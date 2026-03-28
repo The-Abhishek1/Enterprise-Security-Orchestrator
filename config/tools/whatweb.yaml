@@ -1,0 +1,15 @@
+name: whatweb
+version: "0.5.5"
+capabilities:
+  - tech_detection
+  - web_fingerprint
+image: eso-worker-whatweb:latest
+command: whatweb
+description: Web technology fingerprinting — identifies CMS, frameworks, libraries, server software
+resource_requirements:
+  cpu: "0.3"
+  memory: "256Mi"
+  disk: "100Mi"
+default_timeout: 120
+cacheable: true
+param_mapping: {}

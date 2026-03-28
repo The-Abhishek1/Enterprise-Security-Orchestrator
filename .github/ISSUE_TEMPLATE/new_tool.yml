@@ -1,0 +1,26 @@
+name: Add New Tool
+description: Request or contribute a new security tool
+labels: [new-tool, good-first-issue]
+body:
+  - type: input
+    attributes:
+      label: Tool name
+      placeholder: e.g. amass, subfinder, wpscan
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: What does it do?
+      description: Brief description of the tool's purpose
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Tool website/repo
+      placeholder: https://github.com/...
+  - type: dropdown
+    attributes:
+      label: Are you willing to implement this?
+      options:
+        - "Yes — I'll submit a PR"
+        - "No — requesting someone else implement it"

@@ -1,0 +1,15 @@
+name: nikto
+version: "2.5.0"
+capabilities:
+  - web_vuln_scan
+  - server_misconfiguration
+image: eso-worker-nikto:latest
+command: nikto
+description: Web server vulnerability scanner — checks for dangerous files, outdated software, server misconfigurations
+resource_requirements:
+  cpu: "0.5"
+  memory: "256Mi"
+  disk: "100Mi"
+default_timeout: 600
+cacheable: true
+param_mapping: {}

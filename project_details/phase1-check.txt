@@ -1,0 +1,92 @@
+✅ Phase 1 Validation Checklist
+Let's validate what we've built:
+
+Authentication/Authorization - JWT tokens, API keys, permission system
+
+Rate Limiting - Redis-based rate limiting
+
+Request Validation - Pydantic models with custom validators
+
+Audit Logging - Structured logging with audit trail
+
+Encryption - Field-level encryption support
+
+API Versioning - v1 prefix ready
+
+OpenAPI Documentation - Auto-generated Swagger docs
+
+Observability - Structured logging, metrics ready
+
+Containerization - Docker Compose for dependencies
+
+Error Handling - Enterprise-grade exceptions
+
+Middleware - Correlation IDs, security headers, compression
+
+Database Connections - PostgreSQL, Redis, RabbitMQ
+
+Health Checks - /health, /ready, /live endpoints
+
+# 1. Test root endpoint
+curl http://localhost:8000/
+
+# 2. Test health check
+curl http://localhost:8000/api/v1/health
+
+# 3. Test liveness
+curl http://localhost:8000/api/v1/health/live
+
+# 4. Test readiness
+curl http://localhost:8000/api/v1/health/ready
+
+# 5. Test execution endpoint
+curl -X POST "http://localhost:8000/api/v1/hybrid/execute" \
+  -H "Content-Type: application/json" \
+  -d '{"goal": "Scan example.com for open ports", "target": "example.com"}'
+
+# You should get a response like:
+{
+  "process_id": "proc_abc123...",
+  "status": "pending",
+  "goal": "Scan example.com for open ports",
+  "target": "example.com",
+  "created_at": "2024-01-01T00:00:00.000Z",
+  "updated_at": null,
+  "estimated_completion": null,
+  "message": null
+}
+
+# 6. Check execution status (use the process_id from above)
+curl "http://localhost:8000/api/v1/hybrid/status/proc_abc123..."
+
+# 7. List all executions
+curl "http://localhost:8000/api/v1/hybrid/list"
+
+# 8. Test with API key header
+curl -X POST "http://localhost:8000/api/v1/hybrid/execute" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: eso_test_key_123" \
+  -d '{"goal": "Scan with API key", "target": "example.com"}'
+
+# 9. Test with JWT token (if you have one)
+curl -X POST "http://localhost:8000/api/v1/hybrid/execute" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-jwt-token>" \
+  -d '{"goal": "Scan with JWT", "target": "example.com"}'
+
+# 10. Test rate limiting (make multiple requests quickly)
+for i in {1..5}; do
+  curl -s -o /dev/null -w "%{http_code}\n" -X POST "http://localhost:8000/api/v1/hybrid/execute" \
+    -H "Content-Type: application/json" \
+    -d '{"goal": "Rate limit test", "target": "example.com"}'
+done
+
+# 11. Test OpenAPI docs (open in browser)
+# http://localhost:8000/docs
+# http://localhost:8000/redoc
+
+# 12. Test metrics endpoint
+curl http://localhost:8000/metrics
+
+# 13. Test cancel execution
+curl -X POST "http://localhost:8000/api/v1/hybrid/cancel/proc_abc123..."

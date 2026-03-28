@@ -1,0 +1,135 @@
+┌─────────────────────────────────────────────────────────────┐
+│                    PHASE 2 COMPONENTS                        │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              HYBRID SCHEDULER                         │   │
+│  │  • Process lifecycle management                       │   │
+│  │  • DAG creation & execution                           │   │
+│  │  • State persistence                                   │   │
+│  │  • Budget & quota enforcement                          │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                           │                                  │
+│           ┌───────────────┼───────────────┐                  │
+│           ▼               ▼               ▼                  │
+│  ┌───────────────┐ ┌───────────────┐ ┌───────────────┐      │
+│  │  PLANNER      │ │   VERIFIER    │ │    MEMORY     │      │
+│  │  AGENT        │ │   AGENT       │ │    SYSTEM     │      │
+│  │ • LLM-based   │ │ • DAG cycles  │ │ • Vector DB   │      │
+│  │ • Memory-aware│ │ • Resources   │ │ • Graph DB    │      │
+│  │ • Multi-LLM   │ │ • Capabilities│ │ • Time Series │      │
+│  └───────────────┘ └───────────────┘ └───────────────┘      │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │           TASK CONTEXT & LIFECYCLE                   │   │
+│  │  • Isolated execution context                        │   │
+│  │  • State management                                   │   │
+│  │  • Error recovery                                     │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+
+
+src/
+├── scheduler/
+│   ├── __init__.py
+│   ├── hybrid_scheduler.py      # Main scheduler
+│   ├── lifecycle_manager.py      # Execution lifecycle
+│   ├── task_context.py           # Task context management
+│   ├── budget_tracker.py         # Budget tracking
+│   └── quota_manager.py          # Quota enforcement
+│
+├── agents/
+│   ├── planner/
+│   │   ├── __init__.py
+│   │   ├── planner_agent.py      # LLM-based planner
+│   │   ├── llm_factory.py        # Multi-LLM support
+│   │   └── prompt_templates.py   # Planning prompts
+│   │
+│   ├── verifier/
+│   │   ├── __init__.py
+│   │   ├── verifier_agent.py     # DAG verifier
+│   │   ├── dag_validator.py      # DAG validation
+│   │   └── resource_validator.py # Resource checks
+│   │
+│   └── collaboration/
+│       ├── __init__.py
+│       └── memory_bus.py         # Agent communication
+│
+├── memory/
+│   ├── __init__.py
+│   ├── memory_service.py         # Main memory interface
+│   ├── vector_store.py           # Vector DB (Pinecone/Qdrant)
+│   ├── graph_store.py            # Graph DB (Neo4j)
+│   └── time_series_store.py      # Time series (InfluxDB)
+│
+└── models/
+    ├── __init__.py
+    ├── dag.py                    # DAG models (updated)
+    └── execution.py               # Execution models
+    
+
+
+✅ Phase 2 Validation Checklist
+Let's verify each component:
+
+Core Components
+LLM Factory - Multi-provider support (OpenAI, Anthropic, Local)
+
+Planner Agent - Creates DAGs from goals
+
+Verifier Agent - Validates DAG structure and resources
+
+Memory Service - Vector, Graph, Time Series storage
+
+Task Context - Isolated execution environment
+
+Budget Tracker - Real-time cost tracking
+
+Quota Manager - Concurrent execution limits
+
+Lifecycle Manager - State transitions and events
+
+Hybrid Scheduler - Full execution orchestration
+
+
+# 1. Install additional dependencies
+pip install aiohttp numpy scikit-learn
+
+# 2. Start infrastructure
+docker-compose up -d
+
+# 3. Start the API
+uvicorn src.api.app:app --reload
+
+# 4. Test planning (should work with local LLM)
+curl -X POST "http://localhost:8000/api/v1/hybrid/execute" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": "Perform comprehensive security scan of example.com",
+    "target": "example.com",
+    "priority": "high"
+  }'
+
+# 5. Check status
+curl "http://localhost:8000/api/v1/hybrid/status/proc_xxxxxx"
+
+# 6. Test with different LLM provider (update .env first)
+# LLM_PROVIDER=openai
+# OPENAI_API_KEY=your-key
+
+# 7. Test budget limits
+curl -X POST "http://localhost:8000/api/v1/hybrid/execute" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": "Deep scan with budget",
+    "target": "example.com",
+    "budget_limit": 0.50
+  }'
+
+# 8. Test quota limits (run multiple concurrent)
+for i in {1..5}; do
+  curl -X POST "http://localhost:8000/api/v1/hybrid/execute" \
+    -H "Content-Type: application/json" \
+    -d "{\"goal\": \"Test $i\", \"target\": \"example.com\"}" &
+done

@@ -1,0 +1,45 @@
+
+# 1. Start server — should see "✅ Database schema initialized"
+uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
+
+# 2. Register
+curl -X POST http://localhost:8000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@test.com", "username": "admin", "password": "password123"}'
+
+# 3. Create API key (use the access_token from step 2)
+curl -X POST http://localhost:8000/api/v1/auth/api-keys \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "scanner-key"}'
+
+# 4. Run scan with API key
+curl -X POST http://localhost:8000/api/v1/hybrid/execute \
+  -H "X-API-Key: eso_abc..." \
+  -H "Content-Type: application/json" \
+  -d '{"goal": "Scan scanme.nmap.org", "target": "scanme.nmap.org"}'
+
+# 5. Wait ~60s for nmap to finish, then check proposals
+curl http://localhost:8000/api/v1/hybrid/proposals/proc_XXX
+
+# 6. Approve what you want
+curl -X POST http://localhost:8000/api/v1/hybrid/approve/proc_XXX \
+  -H "Content-Type: application/json" \
+  -d '{"approved": ["Directory bruteforce on scanme.nmap.org"]}'
+
+# 7. After scan completes, check history
+curl http://localhost:8000/api/v1/auth/scans \
+  -H "Authorization: Bearer <access_token>"
+
+# 8. Get full scan with report
+curl http://localhost:8000/api/v1/auth/scans/proc_XXX \
+  -H "Authorization: Bearer <access_token>"
+
+# 9. Download PDF report after scan completes
+curl -o report.pdf http://localhost:8000/api/v1/hybrid/report/proc_XXX/pdf
+
+    # Or open in browser
+    http://localhost:8000/api/v1/hybrid/report/proc_XXX/pdf
+
+# 10. When complete, get full results with report
+curl http://localhost:8000/api/v1/hybrid/status/proc_XXX | python3 -m json.tool

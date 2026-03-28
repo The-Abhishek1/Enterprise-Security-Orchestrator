@@ -1,0 +1,16 @@
+name: nuclei
+version: "3.1.0"
+capabilities:
+  - vuln_scan
+  - template_based
+  - web_scan
+image: eso-worker-nuclei:latest
+command: nuclei
+description: Fast vulnerability scanner
+resource_requirements:
+  cpu: "1.0"
+  memory: "1Gi"
+  disk: "500Mi"
+default_timeout: 1200
+cacheable: true
+param_mapping: {}

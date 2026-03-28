@@ -1,0 +1,17 @@
+name: nmap
+version: "7.94"
+capabilities:
+  - port_scan
+  - service_detection
+  - os_detection
+  - network_scan
+image: eso-worker-nmap:latest
+command: nmap
+description: Network discovery and port scanning
+resource_requirements:
+  cpu: "0.5"
+  memory: "512Mi"
+  disk: "100Mi"
+default_timeout: 600
+cacheable: true
+param_mapping: {}

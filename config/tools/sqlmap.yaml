@@ -1,0 +1,14 @@
+name: sqlmap
+version: "1.8"
+capabilities:
+  - sql_injection
+image: eso-worker-sqlmap:latest
+command: sqlmap
+description: SQL injection detection and exploitation
+resource_requirements:
+  cpu: "0.5"
+  memory: "512Mi"
+  disk: "100Mi"
+default_timeout: 600
+cacheable: false
+param_mapping: {}

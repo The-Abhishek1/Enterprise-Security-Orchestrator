@@ -1,0 +1,16 @@
+name: ffuf
+version: "2.1.0"
+capabilities:
+  - directory_bruteforce
+  - parameter_fuzzing
+  - vhost_discovery
+image: eso-worker-ffuf:latest
+command: ffuf
+description: Fast web fuzzer — directory/file discovery, parameter fuzzing, virtual host discovery
+resource_requirements:
+  cpu: "0.5"
+  memory: "256Mi"
+  disk: "100Mi"
+default_timeout: 300
+cacheable: true
+param_mapping: {}

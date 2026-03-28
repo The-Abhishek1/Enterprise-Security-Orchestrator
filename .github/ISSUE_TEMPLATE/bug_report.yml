@@ -1,0 +1,23 @@
+name: Bug Report
+description: Report a bug
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Describe the bug
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected behavior
+      description: What did you expect?
+  - type: textarea
+    attributes:
+      label: Logs
+      description: Paste relevant server logs
+      render: shell
+  - type: input
+    attributes:
+      label: Tool(s) involved
+      description: nmap, nuclei, gobuster, etc.
