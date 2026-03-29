@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #050510; --bg2: #0a0a1f;
+  --accent: #6366f1; --accent2: #818cf8;
+  --green: #22c55e; --red: #ef4444; --yellow: #eab308; --cyan: #06b6d4; --orange: #f97316;
+}
+
+body { background: var(--bg); color: #e8eaf0; }
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: -1;
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99,102,241,0.1), transparent 70%),
+              radial-gradient(ellipse 50% 40% at 100% 100%, rgba(139,92,246,0.06), transparent 60%);
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/[0.03] border border-white/[0.06] rounded-2xl;
+    backdrop-filter: blur(24px) saturate(1.3);
+    transition: all 0.25s ease;
+  }
+  .glass:hover { border-color: rgba(255,255,255,0.12); }
+  .glass-solid { background: var(--bg2); @apply border border-white/[0.06] rounded-2xl; }
+
+  .btn-primary {
+    @apply px-5 py-2.5 rounded-lg text-sm font-semibold text-white inline-flex items-center gap-2 transition-all;
+    background: var(--accent);
+    box-shadow: 0 0 20px rgba(99,102,241,0.2);
+  }
+  .btn-primary:hover { background: var(--accent2); box-shadow: 0 0 30px rgba(99,102,241,0.35); transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
+
+  .btn-ghost {
+    @apply px-4 py-2 rounded-lg text-sm font-medium text-gray-400 border border-white/[0.06] transition-all;
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-success { @apply px-4 py-2 rounded-lg text-sm font-semibold transition-all; background: rgba(34,197,94,0.12); color: var(--green); border: 1px solid rgba(34,197,94,0.2); }
+  .btn-success:hover { background: rgba(34,197,94,0.2); }
+  .btn-danger { @apply px-4 py-2 rounded-lg text-sm font-semibold transition-all; background: rgba(239,68,68,0.12); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
+  .btn-danger:hover { background: rgba(239,68,68,0.2); }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 rounded-lg text-sm text-white outline-none transition-all;
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+  }
+  .input-field:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+
+  .badge { @apply inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider; }
+  .badge-running { background: rgba(99,102,241,0.12); color: var(--accent); border: 1px solid rgba(99,102,241,0.25); }
+  .badge-completed { background: rgba(34,197,94,0.12); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
+  .badge-failed, .badge-timeout { background: rgba(239,68,68,0.12); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
+  .badge-planning, .badge-pending, .badge-queued { background: rgba(234,179,8,0.12); color: var(--yellow); border: 1px solid rgba(234,179,8,0.25); }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }

@@ -23,6 +23,7 @@ from src.engine.risk_engine import RiskEngine
 from src.engine.llm_agents import AnalysisAgent, TaskProposerAgent, ReportGeneratorAgent
 from src.tools.tool_router import ToolRouter
 from src.memory.memory_service import MemoryService
+from src.services.event_bus import event_bus
 from src.utils.logging import logger
 
 
@@ -123,6 +124,8 @@ class ExecutionController:
         execution_order = dag.get_execution_order()
         logger.info(f"📊 Initial DAG: {len(execution_order)} levels, {dag.total_tasks} tasks")
         
+        await event_bus.emit("execution_start", process_id, target=target, total_tasks=dag.total_tasks, levels=len(execution_order))
+        
         level_number = 0
         
         while level_number < len(execution_order):
@@ -143,6 +146,11 @@ class ExecutionController:
             # === EXECUTE LEVEL ===
             logger.info(f"▶️ Level {level_number}/{len(execution_order)}: {len(task_ids)} tasks")
             
+            # Get task names for event
+            level_task_names = [dag.nodes[tid].name for tid in task_ids if tid in dag.nodes]
+            level_tools = [dag.nodes[tid].metadata.get("tool", "unknown") for tid in task_ids if tid in dag.nodes]
+            await event_bus.emit("level_start", process_id, level=level_number, total_levels=len(execution_order), tasks=level_task_names, tools=level_tools)
+            
             level_findings, level_tool_runs = await self._execute_level(
                 execution=execution,
                 dag=dag,
@@ -157,6 +165,8 @@ class ExecutionController:
             progress = (execution.completed_tasks / execution.total_tasks * 100) if execution.total_tasks > 0 else 0
             logger.info(f"📈 Progress: {progress:.1f}% ({execution.completed_tasks}/{execution.total_tasks} tasks)")
             
+            await event_bus.emit("level_complete", process_id, level=level_number, findings_count=len(level_findings), progress=round(progress, 1), completed=execution.completed_tasks, total=execution.total_tasks)
+            
             if not level_findings:
                 logger.info(f"   No findings from this level, continuing")
                 continue
@@ -165,15 +175,18 @@ class ExecutionController:
             
             # === ANALYSIS AGENT (LLM) ===
             logger.info(f"🧠 ===== ANALYSIS AGENT (Level {level_number}) =====")
+            await event_bus.emit("analysis_start", process_id, level=level_number, findings_count=len(level_findings))
+            
             analysis = await self.analysis_agent.analyze(level_findings, target)
             self.llm_calls += 1
             
             # Replace findings with validated ones (false positives removed)
             validated_findings = analysis.get("validated_findings", level_findings)
             if analysis.get("removed", 0) > 0:
-                # Update all_findings — remove the level's raw findings and add validated
                 all_findings = all_findings[:-len(level_findings)]
                 all_findings.extend(validated_findings)
+            
+            await event_bus.emit("analysis_done", process_id, validated=len(validated_findings), removed=analysis.get("removed", 0), summary=analysis.get("summary", ""))
             
             # === RISK ENGINE ===
             logger.info(f"⚖️ ===== RISK ENGINE (Level {level_number}) =====")
@@ -182,6 +195,8 @@ class ExecutionController:
             
             logger.info(f"   Overall risk: {risk_summary['overall_risk']} (score: {risk_summary['overall_score']})")
             logger.info(f"   Critical: {risk_summary['critical_count']}, High: {risk_summary['high_count']}, Medium: {risk_summary['medium_count']}")
+            
+            await event_bus.emit("risk_update", process_id, risk=risk_summary.get("overall_risk"), score=risk_summary.get("overall_score"), critical=risk_summary.get("critical_count", 0), high=risk_summary.get("high_count", 0), medium=risk_summary.get("medium_count", 0))
             
             # Log top risk findings
             for f in scored_findings[:3]:
@@ -230,6 +245,8 @@ class ExecutionController:
                     logger.info(f"      {i+1}. {prop['task_name']} (tool: {prop['tool']}, priority: {prop['priority']})")
                     logger.info(f"         Reason: {prop['reason'][:80]}")
                 
+                await event_bus.emit("proposal", process_id, proposals=[{"task_name": p["task_name"], "tool": p["tool"], "reason": p["reason"], "priority": p["priority"]} for p in proposals])
+                
                 # Store proposals and wait for user approval
                 self._pending_proposals[process_id] = proposals
                 self._approval_events[process_id] = asyncio.Event()
@@ -247,6 +264,8 @@ class ExecutionController:
                 execution.metadata["awaiting_approval"] = True
                 
                 logger.info(f"   ⏸️ Execution paused — waiting for user approval via POST /api/v1/hybrid/approve/{process_id}")
+                
+                await event_bus.emit("approval_needed", process_id, proposals=[{"task_name": p["task_name"], "tool": p["tool"], "reason": p["reason"]} for p in proposals])
                 
                 # Cancel execution timeout during approval wait
                 await lifecycle_manager._cancel_timeout(process_id)
@@ -327,6 +346,8 @@ class ExecutionController:
         duration = (datetime.utcnow() - start_time).total_seconds()
         
         logger.info(f"📝 ===== GENERATING REPORT =====")
+        await event_bus.emit("report_start", process_id)
+        
         report = await self.report_generator.generate(
             target=target,
             findings=all_findings,
@@ -344,6 +365,7 @@ class ExecutionController:
             for line in report.split('\n'):
                 logger.info(f"📄 {line}")
             logger.info(f"{'='*60}")
+            await event_bus.emit("report_done", process_id, length=len(report))
         
         # === FINAL STATS ===
         logger.info(f"🎉 ===== EXECUTION COMPLETE for {process_id} =====")
@@ -353,6 +375,12 @@ class ExecutionController:
         logger.info(f"   • Findings: {len(all_findings)}")
         logger.info(f"   • Risk: {final_risk['overall_risk']} (score: {final_risk['overall_score']})")
         logger.info(f"   • LLM calls: {self.llm_calls}")
+        
+        await event_bus.emit("complete", process_id,
+            tasks_completed=execution.completed_tasks, total_tasks=execution.total_tasks,
+            dynamic_tasks=dynamic_tasks_added, duration=round(duration, 1),
+            findings=len(all_findings), risk=final_risk.get("overall_risk"),
+            risk_score=final_risk.get("overall_score"), llm_calls=self.llm_calls)
         
         return {
             "findings": all_findings,
@@ -459,6 +487,9 @@ class ExecutionController:
             raise Exception(f"Tool '{tool_name}' not found")
         
         logger.info(f"   🐳 Running {tool_name}: {json.dumps({k:v for k,v in params.items() if k != 'target'}, default=str)[:80]}")
+        
+        await event_bus.emit("task_start", execution.process_id, task_name=task.name, tool=tool_name, task_id=task.task_id)
+        
         result = await self.tool_router._execute_tool(
             tool=tool_config,
             params=params,
@@ -473,7 +504,19 @@ class ExecutionController:
         exit_code = result.get("exit_code", -1)
         command = result.get("command", "")
         
+        # Stream output lines as events
+        output_text = (stdout + "\n" + stderr).strip() if stderr else stdout.strip()
+        if output_text:
+            lines = [l for l in output_text.split('\n') if l.strip()]
+            # Send first 30 lines as individual events (for live streaming feel)
+            for line in lines[:30]:
+                await event_bus.emit("task_output", execution.process_id, task_name=task.name, tool=tool_name, line=line.strip())
+            if len(lines) > 30:
+                await event_bus.emit("task_output", execution.process_id, task_name=task.name, tool=tool_name, line=f"... ({len(lines) - 30} more lines)")
+        
         findings = self.result_parser.parse(tool_name, stdout, stderr, exit_code)
+        
+        await event_bus.emit("task_complete", execution.process_id, task_name=task.name, tool=tool_name, findings_count=len(findings), exit_code=exit_code, duration=result.get("duration", 0))
         
         tool_run = {
             "tool": tool_name,

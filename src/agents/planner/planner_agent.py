@@ -80,7 +80,7 @@ class PlannerAgent:
         try:
             plan_data = await asyncio.wait_for(
                 self._generate_plan_with_llm(goal, target, similar_tasks),
-                timeout=50.0  # 20 second timeout for LLM planning
+                timeout=100.0  # 20 second timeout for LLM planning
             )
         except asyncio.TimeoutError:
             logger.warning("LLM planning timed out, using fallback plan")

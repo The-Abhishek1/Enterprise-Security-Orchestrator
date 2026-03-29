@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import time
 import uuid
 
-from src.api.routes.v1 import hybrid, health, memory, debug, workers, stream, ui, auth
+from src.api.routes.v1 import hybrid, health, memory, debug, workers, stream, ui, auth, system, ws
 from src.api.middleware.correlation import CorrelationMiddleware
 from src.api.middleware.audit import AuditMiddleware
 from src.api.middleware.auth import AuthenticationMiddleware
@@ -279,10 +279,12 @@ def create_app() -> FastAPI:
     
     app.include_router(health.router, prefix=api_prefix)
     app.include_router(auth.router, prefix=api_prefix)
+    app.include_router(system.router, prefix=api_prefix)
     app.include_router(hybrid.router, prefix=api_prefix)
     app.include_router(debug.router, prefix=api_prefix)
     app.include_router(workers.router, prefix=api_prefix)
     app.include_router(stream.router, prefix=api_prefix)
+    app.include_router(ws.router, prefix=api_prefix)
     app.include_router(ui.router, prefix=api_prefix)
     
     # Add memory stats endpoint for debugging

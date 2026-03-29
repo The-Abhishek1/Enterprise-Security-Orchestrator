@@ -67,7 +67,7 @@ def _build_styles():
         fontSize=13, textColor=SUCCESS, spaceBefore=12, spaceAfter=6
     ))
     styles.add(ParagraphStyle(
-        'BodyText', parent=styles['Normal'],
+        'ESOBody', parent=styles['Normal'],
         fontSize=10, leading=14, alignment=TA_JUSTIFY, spaceAfter=6
     ))
     styles.add(ParagraphStyle(
@@ -169,7 +169,7 @@ class PDFReportGenerator:
         if report_md:
             story.extend(self._render_markdown(report_md, s))
         else:
-            story.append(Paragraph("No detailed report available.", s['BodyText']))
+            story.append(Paragraph("No detailed report available.", s['ESOBody']))
 
         # -- Scan metadata --
         story.append(Spacer(1, 20))
@@ -254,7 +254,7 @@ class PDFReportGenerator:
                     table_rows, in_table = [], False
                 # Bold markers
                 text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', line)
-                elements.append(Paragraph(text, s['BodyText']))
+                elements.append(Paragraph(text, s['ESOBody']))
 
             i += 1
 
