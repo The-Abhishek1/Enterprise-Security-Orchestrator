@@ -6,17 +6,17 @@ dist/
 build/
 venv/
 .venv/
-*.egg
 
 # Environment
 .env
-.env.example
+!.env.example
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
@@ -26,13 +26,19 @@ Thumbs.db
 *.log
 logs/
 
-# Docker volumes
+# Docker volumes (local dev)
 postgres_data/
 redis_data/
 
-# Reports (generated)
-*.pdf
-reports/
+# Reports
+reports/*.pdf
 
-# Node (if frontend added later)
-node_modules/
+# Node (frontend)
+eso-frontend/node_modules/
+eso-frontend/.next/
+eso-frontend/out/
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
