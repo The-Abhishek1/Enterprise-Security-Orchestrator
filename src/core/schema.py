@@ -91,6 +91,34 @@ CREATE TABLE IF NOT EXISTS findings (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- Audit logs (persisted to DB)
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id SERIAL PRIMARY KEY,
+    audit_id VARCHAR(64) UNIQUE NOT NULL,
+    timestamp TIMESTAMP DEFAULT NOW(),
+    action VARCHAR(200) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) DEFAULT 'default',
+    resource_type VARCHAR(50),
+    resource_id VARCHAR(100),
+    details JSONB,
+    status VARCHAR(20) DEFAULT 'success',
+    error TEXT,
+    ip_address VARCHAR(45),
+    user_agent TEXT
+);
+
+-- Target rules (allowlist/denylist per tenant)
+CREATE TABLE IF NOT EXISTS target_rules (
+    id SERIAL PRIMARY KEY,
+    tenant_id VARCHAR(64) DEFAULT 'default',
+    pattern VARCHAR(500) NOT NULL,
+    rule_type VARCHAR(10) NOT NULL CHECK (rule_type IN ('allow', 'deny')),
+    reason TEXT,
+    created_by VARCHAR(64),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_scan_history_user ON scan_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_scan_history_status ON scan_history(status);
@@ -104,6 +132,105 @@ CREATE INDEX IF NOT EXISTS idx_findings_type ON findings(type);
 CREATE INDEX IF NOT EXISTS idx_findings_severity ON findings(severity);
 CREATE INDEX IF NOT EXISTS idx_findings_source ON findings(source);
 CREATE INDEX IF NOT EXISTS idx_findings_port ON findings(port);
+CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_target_rules_tenant ON target_rules(tenant_id);
+
+-- Scan templates (reusable scan configs)
+CREATE TABLE IF NOT EXISTS scan_templates (
+    id SERIAL PRIMARY KEY,
+    template_id VARCHAR(64) UNIQUE NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) DEFAULT 'default',
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    target VARCHAR(500) NOT NULL,
+    goal TEXT NOT NULL,
+    parameters JSONB DEFAULT '{}',
+    tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Scheduled scans (cron-like recurring scans)
+CREATE TABLE IF NOT EXISTS scheduled_scans (
+    id SERIAL PRIMARY KEY,
+    schedule_id VARCHAR(64) UNIQUE NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) DEFAULT 'default',
+    template_id VARCHAR(64) NOT NULL,
+    cron_expression VARCHAR(100) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    last_run_at TIMESTAMP,
+    next_run_at TIMESTAMP,
+    last_process_id VARCHAR(64),
+    run_count INTEGER DEFAULT 0,
+    max_runs INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_templates_user ON scan_templates(user_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_user ON scheduled_scans(user_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_next ON scheduled_scans(next_run_at);
+CREATE INDEX IF NOT EXISTS idx_schedules_active ON scheduled_scans(is_active);
+
+-- Teams (collaboration workspaces)
+CREATE TABLE IF NOT EXISTS teams (
+    id SERIAL PRIMARY KEY,
+    team_id VARCHAR(64) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    description TEXT,
+    owner_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) DEFAULT 'default',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Team members
+CREATE TABLE IF NOT EXISTS team_members (
+    id SERIAL PRIMARY KEY,
+    team_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    role VARCHAR(20) DEFAULT 'member',
+    invited_by VARCHAR(64),
+    joined_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(team_id, user_id)
+);
+
+-- Finding comments (collaboration on findings)
+CREATE TABLE IF NOT EXISTS finding_comments (
+    id SERIAL PRIMARY KEY,
+    comment_id VARCHAR(64) UNIQUE NOT NULL,
+    finding_id VARCHAR(64) NOT NULL,
+    process_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    username VARCHAR(100),
+    content TEXT NOT NULL,
+    comment_type VARCHAR(20) DEFAULT 'manual',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- AI chat history per finding
+CREATE TABLE IF NOT EXISTS ai_chats (
+    id SERIAL PRIMARY KEY,
+    chat_id VARCHAR(64) UNIQUE NOT NULL,
+    finding_id VARCHAR(64),
+    process_id VARCHAR(64),
+    user_id VARCHAR(64) NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    chat_type VARCHAR(30) DEFAULT 'explain',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_teams_owner ON teams(owner_id);
+CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id);
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_comments_finding ON finding_comments(finding_id);
+CREATE INDEX IF NOT EXISTS idx_comments_process ON finding_comments(process_id);
+CREATE INDEX IF NOT EXISTS idx_ai_chats_finding ON ai_chats(finding_id);
+CREATE INDEX IF NOT EXISTS idx_ai_chats_user ON ai_chats(user_id);
 """
 
 # Dev user — auto-created so dev mode scans can save to DB

@@ -44,11 +44,12 @@ class ResultParser:
     
     def _parse_nmap(self, output: str, exit_code: int) -> List[Dict]:
         findings = []
+        ansi_re = re.compile(r'\x1b\[[0-9;]*m|\[[\d;]*m')
         
         for line in output.split('\n'):
-            line = line.strip()
+            line = ansi_re.sub('', line).strip()
             
-            if line.startswith("Discovered"):
+            if not line or line.startswith("Discovered") or line.startswith("SF-") or line.startswith("SF:"):
                 continue
             
             if '/tcp' in line and ('open' in line or 'filtered' in line):
@@ -78,14 +79,25 @@ class ResultParser:
     def _parse_nuclei(self, output: str, exit_code: int) -> List[Dict]:
         findings = []
         
+        # Strip ANSI color codes globally
+        ansi_re = re.compile(r'\x1b\[[0-9;]*m|\[[\d;]*m')
+        
         for line in output.split('\n'):
-            line = line.strip()
-            if not line or line.startswith('[INF]') or line.startswith('[WRN]') or line.startswith('[ERR]'):
-                continue
-            if 'projectdiscovery' in line or '____' in line or '/ /' in line or '/_/' in line:
+            line = ansi_re.sub('', line).strip()
+            if not line:
                 continue
             
-            # Nuclei output: [template-id] [protocol] [severity] url
+            # Skip nuclei log/info/banner lines
+            if any(skip in line for skip in [
+                '[INF]', '[WRN]', '[ERR]', '[DBG]', 'projectdiscovery',
+                '____', '/ /', '/_/', 'nuclei-templates', 'Templates loaded',
+                'Current nuclei', 'New templates added', 'Scan completed',
+                'Loading', 'Executing', 'signed templates',
+                'runtime error', 'validate flag'
+            ]):
+                continue
+            
+            # Real nuclei finding: [template-id] [protocol] [severity] url
             match = re.match(r'\[([^\]]+)\]\s*\[([^\]]+)\]\s*\[([^\]]+)\]\s*(.*)', line)
             if match:
                 findings.append({
@@ -96,19 +108,16 @@ class ResultParser:
                     "finding": match.group(4).strip(),
                     "source": "nuclei"
                 })
-            elif line and not line.startswith(' '):
-                # Generic nuclei output line
-                severity = "info"
-                for sev in ["critical", "high", "medium", "low"]:
-                    if f'[{sev}]' in line.lower():
-                        severity = sev
-                        break
+            # Also match: [template-id:matcher] [severity] url (older nuclei format)
+            elif re.match(r'\[.+\]\s*\[(critical|high|medium|low|info)\]', line):
+                sev_match = re.search(r'\[(critical|high|medium|low|info)\]', line)
                 findings.append({
-                    "type": "finding",
-                    "severity": severity,
+                    "type": "vulnerability",
+                    "severity": sev_match.group(1) if sev_match else "info",
                     "finding": line[:200],
                     "source": "nuclei"
                 })
+            # Skip everything else — don't create findings from log noise
         
         return findings
     

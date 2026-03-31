@@ -224,3 +224,39 @@ async def get_scan(process_id: str, current_user: dict = Depends(get_current_use
         raise HTTPException(404, "Scan not found")
     
     return scan
+
+
+# ========================================================
+# Findings
+# ========================================================
+
+@router.get("/scans/{process_id}/findings")
+async def get_scan_findings(process_id: str, current_user: dict = Depends(get_current_user)):
+    """Get all findings for a specific scan."""
+    findings = await user_service.get_findings(process_id, current_user["sub"])
+    return {"process_id": process_id, "findings": findings, "total": len(findings)}
+
+
+@router.get("/findings")
+async def search_findings(
+    severity: str = None,
+    source: str = None,
+    type: str = None,
+    port: int = None,
+    search: str = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
+):
+    """Search findings across all scans. Supports filters: severity, source, type, port, search text."""
+    return await user_service.search_findings(
+        user_id=current_user["sub"],
+        severity=severity, source=source, finding_type=type,
+        port=port, search=search, limit=limit, offset=offset
+    )
+
+
+@router.get("/findings/stats")
+async def finding_stats(current_user: dict = Depends(get_current_user)):
+    """Get aggregated finding statistics — by severity, source, type, top ports."""
+    return await user_service.get_finding_stats(current_user["sub"])

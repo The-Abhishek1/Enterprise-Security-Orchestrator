@@ -2,7 +2,7 @@
 'use client';
 import { useParams } from 'next/navigation';
 import { useEffect, useState, useCallback } from 'react';
-import { scans } from '@/lib/api';
+import { scans, api } from '@/lib/api';
 import { useScanWS } from '@/hooks/use-scan-ws';
 import { usePoll } from '@/hooks/use-poll';
 import WorkflowTimeline from '@/components/scan/workflow-timeline';
@@ -13,41 +13,60 @@ import LiveTerminal from '@/components/scan/live-terminal';
 export default function ScanDetailPage() {
   const { id } = useParams() as { id: string };
   const [scan, setScan] = useState<any>(null);
+  const [fromDb, setFromDb] = useState(false);
 
-  // WebSocket for real-time events
-  const { events, latest, state: wsState, isTerminal, lastOf } = useScanWS(id);
+  // Try in-memory status first, fall back to DB
+  const fetchScan = useCallback(async () => {
+    try {
+      const s = await scans.status(id);
+      if (s && s.status) return s;
+    } catch {}
+    // Fallback: try DB history
+    try {
+      const s = await api.get(`/auth/scans/${id}`);
+      if (s) { setFromDb(true); return s; }
+    } catch {}
+    return null;
+  }, [id]);
 
-  // Polling fallback — only active if WS not connected
-  const usePolling = wsState !== 'connected';
+  // WebSocket for live events
+  const { events, latest, state: wsState, isTerminal } = useScanWS(id);
+
+  // Polling — active if scan is running and WS is not connected
   const isActive = !scan || !['completed', 'failed', 'timeout'].includes(scan?.status);
-  const fetcher = useCallback(() => scans.status(id), [id]);
-  const { data: pollData } = usePoll(fetcher, usePolling && isActive ? 5000 : 0, usePolling && isActive);
+  const usePolling = wsState !== 'connected';
+  const { data: pollData } = usePoll(fetchScan, usePolling && isActive ? 5000 : 0, usePolling && isActive);
 
-  // Merge poll data into scan state
   useEffect(() => { if (pollData) setScan(pollData); }, [pollData]);
 
-  // Also fetch full status periodically for fields WebSocket doesn't carry (report, etc.)
-  useEffect(() => {
-    const load = () => scans.status(id).then(setScan).catch(() => {});
-    load();
-    // Refresh on terminal events
-    if (isTerminal) { setTimeout(load, 1000); }
-  }, [id, isTerminal]);
+  // Initial load
+  useEffect(() => { fetchScan().then(s => { if (s) setScan(s); }); }, [fetchScan]);
 
-  // Refresh when level completes (to get updated findings count)
+  // Refresh on key WS events
   useEffect(() => {
-    if (latest?.type === 'level_complete' || latest?.type === 'analysis_done' || latest?.type === 'report_done') {
-      scans.status(id).then(setScan).catch(() => {});
+    if (latest?.type === 'level_complete' || latest?.type === 'analysis_done' || latest?.type === 'report_done' || latest?.type === 'complete') {
+      fetchScan().then(s => { if (s) setScan(s); });
     }
-  }, [latest, id]);
+  }, [latest, fetchScan]);
 
-  if (!scan) return <div className="text-gray-500 py-20 text-center">Loading scan...</div>;
+  if (!scan) return (
+    <div className="text-center py-20">
+      <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+      <p className="text-gray-500">Loading scan...</p>
+    </div>
+  );
 
   const risk = scan.risk_summary || {};
-  const dur = scan.duration ? `${(scan.duration / 60).toFixed(1)}m` : (scan.started_at ? 'Running...' : '—');
-  const progress = scan.progress || 0;
+  const riskLevel = risk.overall_risk || scan.risk_level || '—';
+  const riskScore = risk.overall_score || scan.risk_score || 0;
+  const findingsCount = scan.findings_count || 0;
+  const completedTasks = scan.completed_tasks || 0;
+  const totalTasks = scan.total_tasks || 0;
+  const progress = scan.progress || (totalTasks > 0 ? (completedTasks / totalTasks * 100) : 0);
+  const dur = scan.duration ? `${(scan.duration / 60).toFixed(1)}m`
+    : scan.duration_seconds ? `${(scan.duration_seconds / 60).toFixed(1)}m`
+    : '—';
 
-  // Derive workflow step from WS events
   const wsStep = deriveStep(events);
 
   return (
@@ -59,19 +78,21 @@ export default function ScanDetailPage() {
           <p className="text-xs text-gray-500 font-mono mt-1">{id}</p>
         </div>
         <div className="flex items-center gap-3 self-start">
-          <span className={`w-2 h-2 rounded-full ${wsState === 'connected' ? 'bg-green-500' : wsState === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-600'}`}
-            title={`WS: ${wsState}`} />
+          {!fromDb && (
+            <span className={`w-2 h-2 rounded-full ${wsState === 'connected' ? 'bg-green-500' : wsState === 'connecting' ? 'bg-yellow-500 animate-pulse' : 'bg-gray-600'}`}
+              title={`WS: ${wsState}`} />
+          )}
           <span className={`badge badge-${scan.status}`}>{scan.status}</span>
         </div>
       </div>
 
-      {/* Stat cards */}
+      {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5">
         {[
           { label: 'Progress', val: `${progress.toFixed(0)}%`, color: 'text-indigo-400' },
-          { label: 'Tasks', val: `${scan.completed_tasks || 0}/${scan.total_tasks || 0}`, color: 'text-white' },
-          { label: 'Findings', val: scan.findings_count || 0, color: 'text-cyan-400' },
-          { label: 'Risk', val: (risk.overall_risk || '—').toUpperCase(), color: riskColor(risk.overall_risk) },
+          { label: 'Tasks', val: `${completedTasks}/${totalTasks}`, color: 'text-white' },
+          { label: 'Findings', val: findingsCount, color: 'text-cyan-400' },
+          { label: 'Risk', val: String(riskLevel).toUpperCase(), color: riskColor(riskLevel) },
           { label: 'Duration', val: dur, color: 'text-gray-300' },
         ].map((s, i) => (
           <div key={i} className="glass p-3 sm:p-4 text-center">
@@ -88,16 +109,28 @@ export default function ScanDetailPage() {
 
       {/* Main grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        {/* Left — Workflow + Proposals */}
         <div className="space-y-5">
-          <WorkflowTimeline scan={scan} wsStep={wsStep} />
-          {scan.awaiting_approval && <ProposalPanel processId={id} onApproved={() => scans.status(id).then(setScan)} />}
+          <WorkflowTimeline scan={scan} wsStep={wsStep > 0 ? wsStep : undefined} />
+          {scan.awaiting_approval && <ProposalPanel processId={id} onApproved={() => fetchScan().then(s => { if (s) setScan(s); })} />}
         </div>
-
-        {/* Right — Terminal + Report */}
         <div className="lg:col-span-2 space-y-5">
-          <LiveTerminal events={events} />
-          {scan.report && <ReportViewer report={scan.report} processId={id} />}
+          {events.length > 0 ? (
+            <LiveTerminal events={events} />
+          ) : (
+            <div className="glass p-5">
+              <h3 className="text-sm font-bold uppercase tracking-wide text-gray-400 mb-3 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-green-500" /> Scan Info
+              </h3>
+              <div className="font-mono text-[11px] text-gray-400 bg-black/30 rounded-lg p-4 border border-white/[0.04] space-y-1">
+                <p><span className="text-indigo-400">[{scan.status}]</span> {scan.target} — {completedTasks}/{totalTasks} tasks</p>
+                <p><span className="text-cyan-400">Risk:</span> {String(riskLevel).toUpperCase()} ({Number(riskScore).toFixed(1)})</p>
+                {findingsCount > 0 && <p><span className="text-green-400">Findings:</span> {findingsCount}</p>}
+                {scan.goal && <p><span className="text-gray-500">Goal:</span> {scan.goal}</p>}
+                {fromDb && <p className="text-gray-600">Loaded from scan history (server was restarted)</p>}
+              </div>
+            </div>
+          )}
+          {(scan.report) && <ReportViewer report={scan.report} processId={id} />}
         </div>
       </div>
     </div>
@@ -109,7 +142,6 @@ function riskColor(r: string) {
 }
 
 function deriveStep(events: any[]): number {
-  // Map event types to workflow steps
   for (let i = events.length - 1; i >= 0; i--) {
     const t = events[i].type;
     if (t === 'complete') return 6;

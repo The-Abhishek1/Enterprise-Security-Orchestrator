@@ -15,6 +15,7 @@ from src.api.models.response import (
 from src.api.dependencies import get_current_user, get_tenant_id, get_request_id
 from src.utils.logging import logger
 from src.services.audit import audit_logger
+from src.services.target_validator import target_validator
 
 router = APIRouter(prefix="/hybrid", tags=["hybrid-execution"])
 
@@ -50,6 +51,23 @@ async def execute_goal(
     """
     
     logger.info(f"🔥 Execution requested: {execution_request.goal[:50]}...")
+    
+    # === TARGET VALIDATION ===
+    if execution_request.target:
+        validation = target_validator.validate(execution_request.target)
+        if not validation["allowed"]:
+            await audit_logger.log(
+                action="scan_blocked",
+                user_id=current_user.get("sub", "unknown"),
+                tenant_id=tenant_id,
+                resource_type="scan",
+                details={"target": execution_request.target, "reason": validation["reason"]},
+                status="denied"
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=f"Target not allowed: {validation['reason']}"
+            )
     
     # Get scheduler
     scheduler = get_scheduler(request)

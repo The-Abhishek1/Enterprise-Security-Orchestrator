@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import time
 import uuid
 
-from src.api.routes.v1 import hybrid, health, memory, debug, workers, stream, ui, auth, system, ws
+from src.api.routes.v1 import hybrid, health, memory, debug, workers, stream, ui, auth, system, ws, schedules, collab, ai_chat, attack_surface
 from src.api.middleware.correlation import CorrelationMiddleware
 from src.api.middleware.audit import AuditMiddleware
 from src.api.middleware.auth import AuthenticationMiddleware
@@ -137,11 +137,19 @@ async def lifespan(app: FastAPI):
     app.state.scheduler = scheduler
     set_scheduler_instance(scheduler)
     
+    # Start cron runner for scheduled scans
+    from src.services.cron_runner import cron_runner
+    cron_runner.set_scheduler(scheduler)
+    await cron_runner.start()
+    
     logger.info(f"✅ API started in {settings.environment.value} mode")
     logger.info(f"   • Tools: {len(tool_registry.tools)}")
     logger.info(f"   • Worker pools: {len(worker_pool.worker_pools)}")
     
     yield
+    
+    # Shutdown
+    await cron_runner.stop()
     
     # Shutdown
     logger.info("🛑 Shutting down Enterprise Security Orchestrator")
@@ -280,6 +288,10 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix=api_prefix)
     app.include_router(auth.router, prefix=api_prefix)
     app.include_router(system.router, prefix=api_prefix)
+    app.include_router(schedules.router, prefix=api_prefix)
+    app.include_router(collab.router, prefix=api_prefix)
+    app.include_router(ai_chat.router, prefix=api_prefix)
+    app.include_router(attack_surface.router, prefix=api_prefix)
     app.include_router(hybrid.router, prefix=api_prefix)
     app.include_router(debug.router, prefix=api_prefix)
     app.include_router(workers.router, prefix=api_prefix)

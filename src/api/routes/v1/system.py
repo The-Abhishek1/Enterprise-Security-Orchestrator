@@ -85,3 +85,107 @@ async def test_llm(current_user: dict = Depends(get_current_user)):
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+# ========================================================
+# Audit Logs
+# ========================================================
+
+@router.get("/audit")
+async def query_audit_logs(
+    user_id: str = None,
+    action: str = None,
+    status: str = None,
+    limit: int = 50,
+    offset: int = 0,
+    current_user: dict = Depends(get_current_user)
+):
+    """Query audit logs. Admin only — non-admins see only their own logs."""
+    from src.services.audit import audit_logger
+
+    # Non-admins can only see their own logs
+    query_user = user_id
+    if current_user.get("role") != "admin":
+        query_user = current_user["sub"]
+
+    return await audit_logger.query(
+        user_id=query_user, action=action, status=status,
+        limit=limit, offset=offset
+    )
+
+
+# ========================================================
+# Target Rules
+# ========================================================
+
+@router.get("/targets")
+async def list_target_rules(current_user: dict = Depends(get_current_user)):
+    """List target allowlist/denylist rules."""
+    if not db_manager.pg_pool:
+        return {"rules": [], "message": "Database not available"}
+
+    async with db_manager.pg_pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id,tenant_id,pattern,rule_type,reason,created_by,created_at FROM target_rules WHERE tenant_id=$1 ORDER BY rule_type,pattern",
+            current_user.get("tenant_id", "default")
+        )
+    return {"rules": [dict(r) for r in rows]}
+
+
+@router.post("/targets")
+async def add_target_rule(
+    pattern: str,
+    rule_type: str,
+    reason: str = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """Add a target allow/deny rule. Admin only."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(403, "Admin only")
+    if rule_type not in ("allow", "deny"):
+        raise HTTPException(400, "rule_type must be 'allow' or 'deny'")
+    if not db_manager.pg_pool:
+        raise HTTPException(503, "Database not available")
+
+    async with db_manager.pg_pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO target_rules (tenant_id,pattern,rule_type,reason,created_by) VALUES ($1,$2,$3,$4,$5)",
+            current_user.get("tenant_id", "default"), pattern, rule_type, reason, current_user["sub"]
+        )
+
+    # Reload validator patterns from DB
+    from src.services.target_validator import target_validator
+    await _reload_target_rules(target_validator, current_user.get("tenant_id", "default"))
+
+    return {"message": f"Rule added: {rule_type} {pattern}", "pattern": pattern, "rule_type": rule_type}
+
+
+@router.delete("/targets/{rule_id}")
+async def delete_target_rule(rule_id: int, current_user: dict = Depends(get_current_user)):
+    """Delete a target rule. Admin only."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(403, "Admin only")
+    if not db_manager.pg_pool:
+        raise HTTPException(503, "Database not available")
+
+    async with db_manager.pg_pool.acquire() as c:
+        res = await c.execute(
+            "DELETE FROM target_rules WHERE id=$1 AND tenant_id=$2", rule_id, current_user.get("tenant_id", "default")
+        )
+    if "DELETE 0" in res:
+        raise HTTPException(404, "Rule not found")
+
+    return {"message": "Rule deleted", "rule_id": rule_id}
+
+
+async def _reload_target_rules(validator, tenant_id: str):
+    """Reload target rules from DB into validator."""
+    if not db_manager.pg_pool:
+        return
+    async with db_manager.pg_pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT pattern,rule_type FROM target_rules WHERE tenant_id=$1", tenant_id
+        )
+    validator.allowed_patterns = [r["pattern"] for r in rows if r["rule_type"] == "allow"]
+    validator.denied_patterns = list(validator.GLOBAL_DENYLIST) + [r["pattern"] for r in rows if r["rule_type"] == "deny"]
+

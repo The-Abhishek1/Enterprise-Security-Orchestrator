@@ -262,35 +262,35 @@ class UserService:
         """Search findings across all scans for a user."""
         pool = self._pool()
 
-        conditions = ["user_id = $1"]
+        conditions = ["f.user_id = $1"]
         params: list = [user_id]
         idx = 2
 
         if severity:
-            conditions.append(f"severity = ${idx}")
+            conditions.append(f"f.severity = ${idx}")
             params.append(severity)
             idx += 1
         if source:
-            conditions.append(f"source = ${idx}")
+            conditions.append(f"f.source = ${idx}")
             params.append(source)
             idx += 1
         if finding_type:
-            conditions.append(f"type = ${idx}")
+            conditions.append(f"f.type = ${idx}")
             params.append(finding_type)
             idx += 1
         if port:
-            conditions.append(f"port = ${idx}")
+            conditions.append(f"f.port = ${idx}")
             params.append(port)
             idx += 1
         if search:
-            conditions.append(f"(finding ILIKE ${idx} OR service ILIKE ${idx} OR template ILIKE ${idx})")
+            conditions.append(f"(f.finding ILIKE ${idx} OR f.service ILIKE ${idx} OR f.template ILIKE ${idx})")
             params.append(f"%{search}%")
             idx += 1
 
         where = " AND ".join(conditions)
 
         async with pool.acquire() as c:
-            total = await c.fetchval(f"SELECT COUNT(*) FROM findings WHERE {where}", *params)
+            total = await c.fetchval(f"SELECT COUNT(*) FROM findings f WHERE {where}", *params)
 
             params_with_limit = params + [limit, offset]
             rows = await c.fetch(

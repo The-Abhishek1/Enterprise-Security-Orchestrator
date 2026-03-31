@@ -56,3 +56,28 @@ GET /api/v1/auth/findings?severity=high&source=nuclei&port=22&search=ssh
 # Get aggregated stats
 GET /api/v1/auth/findings/stats
 # Returns: {total: 142, by_severity: {critical: 2, high: 8, ...}, by_source: {nmap: 50, nuclei: 40, ...}, top_ports: [...]}
+
+
+
+# 1. Create a template
+curl -X POST http://localhost:8000/api/v1/schedules/templates \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Weekly Scan", "target": "scanme.nmap.org", "goal": "Full port scan and vulnerability assessment"}'
+
+# Returns: {"template_id": "tmpl_abc123", ...}
+
+# 2. Schedule it
+curl -X POST http://localhost:8000/api/v1/schedules/ \
+  -H "Content-Type: application/json" \
+  -d '{"template_id": "tmpl_abc123", "cron_expression": "weekly"}'
+
+# Returns: {"schedule_id": "sched_xyz", "next_run_at": "2026-04-07T...", ...}
+
+# 3. List schedules
+curl http://localhost:8000/api/v1/schedules/
+
+# 4. Pause/resume
+curl -X PUT http://localhost:8000/api/v1/schedules/sched_xyz/toggle?active=false
+
+# 5. Delete
+curl -X DELETE http://localhost:8000/api/v1/schedules/sched_xyz
