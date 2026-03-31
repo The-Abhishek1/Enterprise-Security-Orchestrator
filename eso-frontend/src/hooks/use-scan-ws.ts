@@ -9,82 +9,48 @@ export type ScanEvent = {
   timestamp: string;
 };
 
-type WSState = 'connecting' | 'connected' | 'disconnected' | 'error';
-
 export function useScanWS(processId: string | null) {
   const [events, setEvents] = useState<ScanEvent[]>([]);
-  const [status, setStatus] = useState<WSState>('disconnected');
-  const [latest, setLatest] = useState<ScanEvent | null>(null);
+  const [state, setState] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
   const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<NodeJS.Timeout>();
+  const retryRef = useRef<NodeJS.Timeout>();
+  const seenRef = useRef<Set<string>>(new Set());
 
   const connect = useCallback(() => {
     if (!processId) return;
 
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    // Use the API proxy — Next.js rewrites /api/* to backend
-    // But WebSocket needs direct connection to backend
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
-    const url = `${proto}://${host}:8000/api/v1/ws/scan/${processId}`;
+    const url = `${proto}//${host}:8000/api/v1/ws/scan/${processId}`;
 
-    setStatus('connecting');
-
+    setState('connecting');
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => {
-      setStatus('connected');
-    };
-
+    ws.onopen = () => { setState('connected'); };
     ws.onmessage = (msg) => {
       try {
-        const event: ScanEvent = JSON.parse(msg.data);
-        setEvents(prev => [...prev, event]);
-        setLatest(event);
-
-        // Auto-close on terminal events
-        if (['complete', 'error', 'failed'].includes(event.type)) {
-          setStatus('disconnected');
-        }
-      } catch (e) {
-        console.warn('WS parse error:', e);
-      }
+        const ev: ScanEvent = JSON.parse(msg.data);
+        // Deduplicate by timestamp + type
+        const key = `${ev.timestamp}:${ev.type}`;
+        if (seenRef.current.has(key)) return;
+        seenRef.current.add(key);
+        setEvents(prev => [...prev, ev]);
+      } catch {}
     };
-
-    ws.onerror = () => {
-      setStatus('error');
-    };
-
-    ws.onclose = () => {
-      setStatus('disconnected');
-      wsRef.current = null;
-    };
+    ws.onclose = () => { setState('disconnected'); wsRef.current = null; };
+    ws.onerror = () => { setState('error'); ws.close(); retryRef.current = setTimeout(connect, 3000); };
   }, [processId]);
 
-  // Connect on mount / processId change
   useEffect(() => {
-    if (!processId) return;
-    setEvents([]);
-    setLatest(null);
-    connect();
-
-    return () => {
-      clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
+    if (processId) { setEvents([]); seenRef.current.clear(); connect(); }
+    return () => { wsRef.current?.close(); clearTimeout(retryRef.current); };
   }, [processId, connect]);
 
-  // Derived state from events
-  const outputLines = events
-    .filter(e => e.type === 'task_output')
-    .map(e => ({ tool: e.data.tool, line: e.data.line, task: e.data.task_name }));
+  const latest = events.length > 0 ? events[events.length - 1] : null;
+  const isTerminal = latest?.type === 'complete' || latest?.type === 'error';
+  const ofType = (t: string) => events.filter(e => e.type === t);
+  const lastOf = (t: string) => { const m = ofType(t); return m.length ? m[m.length - 1] : null; };
 
-  const proposals = events
-    .filter(e => e.type === 'approval_needed')
-    .at(-1)?.data.proposals || null;
-
-  const isComplete = events.some(e => ['complete', 'error', 'failed'].includes(e.type));
-
-  return { events, latest, status, outputLines, proposals, isComplete };
+  return { events, latest, state, isTerminal, ofType, lastOf };
 }

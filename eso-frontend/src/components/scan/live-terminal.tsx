@@ -3,95 +3,95 @@
 import { useEffect, useRef } from 'react';
 import { ScanEvent } from '@/hooks/use-scan-ws';
 
-type OutputLine = { tool: string; line: string; task: string };
-
-const TOOL_COLORS: Record<string, string> = {
-  nmap: 'text-cyan-400',
-  nuclei: 'text-purple-400',
-  gobuster: 'text-green-400',
-  nikto: 'text-orange-400',
-  ffuf: 'text-yellow-400',
-  whatweb: 'text-blue-400',
-  sqlmap: 'text-red-400',
+const TYPE_COLORS: Record<string, string> = {
+  execution_start: 'text-indigo-400',
+  level_start: 'text-cyan-400',
+  task_start: 'text-yellow-400',
+  task_output: 'text-gray-400',
+  task_complete: 'text-green-400',
+  analysis_start: 'text-purple-400',
+  analysis_done: 'text-purple-300',
+  risk_update: 'text-orange-400',
+  proposal: 'text-yellow-300',
+  approval_needed: 'text-yellow-500',
+  approval_done: 'text-green-300',
+  report_start: 'text-blue-400',
+  report_done: 'text-green-400',
+  complete: 'text-green-500',
+  error: 'text-red-500',
 };
 
-export default function LiveTerminal({
-  events,
-  outputLines,
-}: {
-  events: ScanEvent[];
-  outputLines: OutputLine[];
-}) {
+const TYPE_ICONS: Record<string, string> = {
+  execution_start: '🟢',
+  level_start: '▶',
+  task_start: '🐳',
+  task_output: '  ',
+  task_complete: '✅',
+  analysis_start: '🧠',
+  analysis_done: '📊',
+  risk_update: '⚖️',
+  proposal: '💡',
+  approval_needed: '⏸️',
+  approval_done: '✓',
+  report_start: '📝',
+  report_done: '📄',
+  complete: '🎉',
+  error: '❌',
+};
+
+function formatEvent(ev: ScanEvent): string {
+  const d = ev.data;
+  switch (ev.type) {
+    case 'execution_start': return `Starting scan on ${d.target} (${d.total_tasks} tasks, ${d.levels} levels)`;
+    case 'level_start': return `Level ${d.level}/${d.total_levels}: ${(d.tools || []).join(', ')} → ${(d.tasks || []).join(', ')}`;
+    case 'task_start': return `Running ${d.tool}: ${d.task_name}`;
+    case 'task_output': return `${d.line}`;
+    case 'task_complete': return `${d.tool} done — ${d.findings_count} findings (${(d.duration || 0).toFixed(1)}s)`;
+    case 'analysis_start': return `AI analyzing ${d.findings_count} findings...`;
+    case 'analysis_done': return `Validated: ${d.validated}, removed: ${d.removed} false positives${d.summary ? ' — ' + d.summary : ''}`;
+    case 'risk_update': return `Risk: ${(d.risk || '—').toUpperCase()} (${(d.score || 0).toFixed(1)}) C:${d.critical} H:${d.high} M:${d.medium}`;
+    case 'proposal': return `AI proposes: ${(d.proposals || []).map((p: any) => `${p.task_name} (${p.tool})`).join(', ')}`;
+    case 'approval_needed': return `⏸ Waiting for your approval...`;
+    case 'approval_done': return `User approved tasks`;
+    case 'report_start': return `Generating pentest report...`;
+    case 'report_done': return `Report generated (${d.length} chars)`;
+    case 'complete': return `Scan complete — ${d.findings} findings, risk: ${(d.risk || '—').toUpperCase()}, ${(d.duration || 0).toFixed(0)}s, ${d.llm_calls} LLM calls`;
+    case 'error': return `Error: ${d.message || 'Unknown'}`;
+    default: return JSON.stringify(d).slice(0, 120);
+  }
+}
+
+export default function LiveTerminal({ events }: { events: ScanEvent[] }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [events.length, outputLines.length]);
+  }, [events.length]);
 
   return (
     <div className="glass p-5">
       <h3 className="text-sm font-bold uppercase tracking-wide text-gray-400 mb-3 flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Live Terminal
+        <span className="w-2 h-2 rounded-full bg-green-500" /> Live Terminal
+        <span className="text-[10px] font-normal text-gray-600 ml-auto">{events.length} events</span>
       </h3>
-      <div className="font-mono text-[11px] leading-relaxed bg-black/40 rounded-lg p-4 max-h-[400px] overflow-y-auto border border-white/[0.04]">
-        {/* System events */}
-        {events.map((e, i) => {
-          switch (e.type) {
-            case 'execution_start':
-              return <Line key={i} c="text-indigo-400" t={`▶ Scan started: ${e.data.target} (${e.data.total_tasks} tasks, ${e.data.levels} levels)`} />;
-            case 'level_start':
-              return <Line key={i} c="text-indigo-300" t={`━━ Level ${e.data.level}/${e.data.total_levels}: ${e.data.tasks?.join(', ')}`} />;
-            case 'task_start':
-              return <Line key={i} c={TOOL_COLORS[e.data.tool] || 'text-gray-400'} t={`🐳 ${e.data.tool} → ${e.data.task_name}`} />;
-            case 'task_complete':
-              return <Line key={i} c="text-green-400" t={`✓ ${e.data.tool} done — ${e.data.findings_count} findings (${(e.data.duration || 0).toFixed(1)}s)`} />;
-            case 'analysis_start':
-              return <Line key={i} c="text-purple-400" t={`🧠 AI analyzing ${e.data.findings_count} findings...`} />;
-            case 'analysis_done':
-              return <Line key={i} c="text-purple-300" t={`🧠 Analysis: ${e.data.validated} valid, ${e.data.removed} false positives removed`} />;
-            case 'risk_update':
-              return <Line key={i} c="text-yellow-400" t={`⚖ Risk: ${e.data.risk?.toUpperCase()} (${(e.data.score || 0).toFixed(1)}) C:${e.data.critical} H:${e.data.high} M:${e.data.medium}`} />;
-            case 'proposal':
-              return <Line key={i} c="text-yellow-300" t={`💡 AI proposes: ${e.data.proposals?.map((p: any) => `${p.task_name} (${p.tool})`).join(', ')}`} />;
-            case 'approval_needed':
-              return <Line key={i} c="text-yellow-500" t={`⏸ Waiting for your approval...`} />;
-            case 'approval_done':
-              return <Line key={i} c="text-green-400" t={`✓ Approved: ${e.data.approved?.join(', ') || 'none'}`} />;
-            case 'report_start':
-              return <Line key={i} c="text-indigo-400" t={`📝 Generating pentest report...`} />;
-            case 'report_done':
-              return <Line key={i} c="text-green-400" t={`📄 Report ready (${e.data.length} chars)`} />;
-            case 'complete':
-              return <Line key={i} c="text-green-500" t={`🎉 Scan complete — ${e.data.findings} findings, risk: ${e.data.risk?.toUpperCase()}, ${(e.data.duration || 0).toFixed(0)}s`} />;
-            case 'level_complete':
-              return <Line key={i} c="text-gray-500" t={`  Level done: ${e.data.findings_count} findings, progress ${e.data.progress}%`} />;
-            case 'task_output':
-              // Rendered separately below
-              return null;
-            default:
-              return null;
-          }
-        })}
-
-        {/* Tool output lines (interleaved) */}
-        {outputLines.length > 0 && (
-          <div className="mt-2 pt-2 border-t border-white/[0.04]">
-            <p className="text-gray-600 text-[10px] mb-1">TOOL OUTPUT</p>
-            {outputLines.slice(-50).map((l, i) => (
-              <div key={i} className="flex gap-2 py-px">
-                <span className={`shrink-0 ${TOOL_COLORS[l.tool] || 'text-gray-500'}`}>[{l.tool}]</span>
-                <span className="text-gray-400 break-all">{l.line}</span>
+      <div className="font-mono text-[11px] bg-black/40 rounded-lg p-4 max-h-[350px] overflow-y-auto border border-white/[0.04] space-y-px">
+        {events.length === 0 ? (
+          <p className="text-gray-600">Waiting for events...</p>
+        ) : (
+          events.map((ev, i) => {
+            const color = TYPE_COLORS[ev.type] || 'text-gray-500';
+            const icon = TYPE_ICONS[ev.type] || '•';
+            const isOutput = ev.type === 'task_output';
+            return (
+              <div key={i} className={`${isOutput ? 'pl-6 text-gray-500' : ''} leading-relaxed`}>
+                {!isOutput && <span className="mr-1">{icon}</span>}
+                <span className={color}>{formatEvent(ev)}</span>
               </div>
-            ))}
-          </div>
+            );
+          })
         )}
-
         <div ref={bottomRef} />
       </div>
     </div>
   );
-}
-
-function Line({ c, t }: { c: string; t: string }) {
-  return <p className={`${c} py-0.5`}>{t}</p>;
 }

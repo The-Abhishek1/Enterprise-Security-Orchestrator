@@ -300,8 +300,11 @@ class HybridScheduler:
                 "risk_summary": result.get("risk_summary", {}),
                 "duration": result.get("duration", 0),
                 "dynamic_tasks": result.get("dynamic_tasks", 0),
-                "llm_calls": result.get("llm_calls", 0)
+                "llm_calls": result.get("llm_calls", 0),
+                "executed_tools": result.get("executed_tools", []),
             }
+            # Store raw findings for DB persistence
+            execution.metadata["all_findings"] = result.get("findings", [])
             
             await self._complete_execution(process_id)
             
@@ -362,15 +365,21 @@ class HybridScheduler:
                 "risk_score": risk_summary.get("overall_score", 0.0),
                 "risk_level": risk_summary.get("overall_risk", "none"),
                 "tools_used": list(set(
-                    t.get("tool", "") for t in execution.metadata.get("execution_result", {}).get("executed_tools", [])
-                )) if "execution_result" in execution.metadata else [],
+                    t.get("tool", "") for t in exec_result.get("executed_tools", [])
+                )),
                 "llm_calls": exec_result.get("llm_calls", 0),
                 "duration_seconds": duration,
                 "report": execution.metadata.get("report"),
                 "started_at": execution.started_at,
                 "completed_at": execution.completed_at
             })
-            logger.info(f"💾 Scan saved to history: {process_id}")
+            
+            # Save individual findings
+            all_findings = execution.metadata.get("all_findings", [])
+            if all_findings:
+                await user_service.save_findings(process_id, execution.user_id, all_findings)
+            
+            logger.info(f"💾 Scan + {len(all_findings)} findings saved to DB: {process_id}")
         except Exception as e:
             logger.warning(f"⚠️ Failed to save scan history: {e}")
         

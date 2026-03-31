@@ -43,3 +43,16 @@ curl -o report.pdf http://localhost:8000/api/v1/hybrid/report/proc_XXX/pdf
 
 # 10. When complete, get full results with report
 curl http://localhost:8000/api/v1/hybrid/status/proc_XXX | python3 -m json.tool
+
+
+
+
+# Get findings for a specific scan
+GET /api/v1/auth/scans/{process_id}/findings
+
+# Search findings across ALL scans (with filters)
+GET /api/v1/auth/findings?severity=high&source=nuclei&port=22&search=ssh
+
+# Get aggregated stats
+GET /api/v1/auth/findings/stats
+# Returns: {total: 142, by_severity: {critical: 2, high: 8, ...}, by_source: {nmap: 50, nuclei: 40, ...}, top_ports: [...]}
