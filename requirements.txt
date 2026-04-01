@@ -37,3 +37,5 @@ prometheus-client==0.21.0
 
 # YAML configs
 PyYAML==6.0.2
+psutil
+numpy
