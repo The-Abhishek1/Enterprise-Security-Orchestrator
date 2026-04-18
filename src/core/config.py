@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     local_llm_url: str = Field(default="http://localhost:11434", validation_alias="LOCAL_LLM_URL")
     local_llm_model: str = Field(default="qwen2.5:3b", validation_alias="LOCAL_LLM_MODEL")
     
+    # Payments (Razorpay)
+    razorpay_key_id:     str = Field(default="", validation_alias="RAZORPAY_KEY_ID")
+    razorpay_key_secret: str = Field(default="", validation_alias="RAZORPAY_KEY_SECRET")
+
     # Agent Configuration
     agent_backend: AgentBackend = Field(default=AgentBackend.HARDCODED, validation_alias="AGENT_BACKEND")
     

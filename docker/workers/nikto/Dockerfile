@@ -1,30 +1,16 @@
-FROM alpine:3.19
+FROM debian:bookworm-slim
+LABEL maintainer="xcloak-eso" tool="nikto"
 
-LABEL eso.tool="true" \
-    eso.tool.name="nikto" \
-    eso.tool.version="2.5.0" \
-    eso.tool.command="nikto" \
-    eso.tool.description="Web server vulnerability scanner" \
-    eso.tool.capabilities="web_vuln_scan,server_misconfiguration" \
-    eso.tool.cpu="0.5" \
-    eso.tool.memory="256Mi" \
-    eso.tool.disk="100Mi" \
-    eso.tool.timeout="600"
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    perl git curl ca-certificates procps \
+    libnet-ssleay-perl libio-socket-ssl-perl \
+    libjson-perl libxml-writer-perl \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apk add --no-cache \
-    perl \
-    perl-net-ssleay \
-    perl-io-socket-ssl \
-    perl-json \
-    git \
-    bash \
-    curl
+RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
+    && ln -s /opt/nikto/program/nikto.pl /usr/local/bin/nikto \
+    && chmod +x /opt/nikto/program/nikto.pl
 
-RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto && \
-    chmod +x /opt/nikto/program/nikto.pl && \
-    ln -s /opt/nikto/program/nikto.pl /usr/local/bin/nikto
-
-RUN nikto -h || true
-
-ENTRYPOINT []
+WORKDIR /scan
+RUN perl /opt/nikto/program/nikto.pl -Version
 CMD ["sleep", "infinity"]

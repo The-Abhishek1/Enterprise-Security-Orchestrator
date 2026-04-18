@@ -1,13 +1,19 @@
-# src/api/routes/v1/auth.py
-
 """
-Authentication routes — register, login, token refresh, API keys, scan history.
-"""
+auth.py — hardened authentication routes.
 
+Fixes vs original:
+- login() returns tier in user object AND in JWT payload
+- register() validates email/username/password strictly
+- Brute-force lockout errors surfaced as 429 (not 401)
+- /me fetches fresh tier from DB on every call
+- JWT expiry extended (configured in dependencies.py)
+- All scan/finding queries are user-isolated
+"""
 from fastapi import APIRouter, HTTPException, Request, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
 from datetime import datetime
+import re
 
 from src.api.dependencies import get_current_user, auth_service
 from src.services.user_service import user_service
@@ -16,247 +22,238 @@ from src.utils.logging import logger
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
-# ========================================================
-# Request/Response models
-# ========================================================
-
+# ── request models ─────────────────────────────────────────────────────────
 class RegisterRequest(BaseModel):
-    email: str
+    email:    str
     username: str
     password: str
 
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v):
+        v = v.strip().lower()
+        if not re.match(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$', v):
+            raise ValueError("Invalid email format")
+        return v
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v):
+        if not re.match(r'^[a-zA-Z0-9_\-\.]{3,32}$', v):
+            raise ValueError("Username: 3-32 chars, letters/numbers/_ - .")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
+
+
 class LoginRequest(BaseModel):
-    email: str
+    email:    str
     password: str
 
 class CreateAPIKeyRequest(BaseModel):
-    name: str
-    permissions: Optional[List[str]] = None
-    expires_days: Optional[int] = None
-
-class RevokeAPIKeyRequest(BaseModel):
-    key_id: str
+    name:         str
+    permissions:  Optional[List[str]] = None
+    expires_days: Optional[int]       = None
 
 
-# ========================================================
-# Registration & Login
-# ========================================================
-
+# ── register ────────────────────────────────────────────────────────────────
 @router.post("/register")
 async def register(req: RegisterRequest):
-    """Register a new user account."""
-    
-    if len(req.password) < 8:
-        raise HTTPException(400, "Password must be at least 8 characters")
-    
-    if len(req.username) < 3:
-        raise HTTPException(400, "Username must be at least 3 characters")
-    
     try:
         user = await user_service.register(
-            email=req.email,
-            username=req.username,
-            password=req.password
+            email=req.email, username=req.username, password=req.password
         )
-        
-        # Generate tokens
-        token_data = {"sub": user["user_id"], "email": user["email"], "role": user["role"]}
-        access_token = auth_service.create_access_token(token_data)
-        refresh_token = auth_service.create_refresh_token(token_data)
-        
-        return {
-            "user": user,
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "token_type": "bearer"
-        }
-        
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     except Exception as e:
-        if "already exists" in str(e):
-            raise HTTPException(409, str(e))
+        if "already exists" in str(e).lower():
+            raise HTTPException(409, "Email or username already taken")
         logger.error(f"Registration failed: {e}")
         raise HTTPException(500, "Registration failed")
 
+    token_data = {
+        "sub":       user["user_id"],
+        "email":     user["email"],
+        "role":      user["role"],
+        "tier":      user["tier"],          # ← tier in JWT
+        "tenant_id": user.get("tenant_id", "default"),
+    }
+    return {
+        "user":          user,
+        "access_token":  auth_service.create_access_token(token_data),
+        "refresh_token": auth_service.create_refresh_token(token_data),
+        "token_type":    "bearer",
+    }
 
+
+# ── login ───────────────────────────────────────────────────────────────────
 @router.post("/login")
 async def login(req: LoginRequest):
-    """Login and get JWT tokens."""
-    
-    user = await user_service.login(req.email, req.password)
-    
+    try:
+        user = await user_service.login(
+            email=req.email.strip().lower(), password=req.password
+        )
+    except Exception as e:
+        msg = str(e)
+        if "locked" in msg:
+            raise HTTPException(429, msg)
+        if "disabled" in msg:
+            raise HTTPException(403, msg)
+        raise HTTPException(500, "Login error")
+
     if not user:
         raise HTTPException(401, "Invalid email or password")
-    
+
     token_data = {
-        "sub": user["user_id"],
-        "email": user["email"],
-        "role": user["role"],
-        "tenant_id": user["tenant_id"]
+        "sub":       user["user_id"],
+        "email":     user["email"],
+        "role":      user["role"],
+        "tier":      user["tier"],          # ← tier in JWT
+        "tenant_id": user.get("tenant_id", "default"),
     }
-    access_token = auth_service.create_access_token(token_data)
-    refresh_token = auth_service.create_refresh_token(token_data)
-    
     return {
-        "user": user,
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer"
+        "user":          user,
+        "access_token":  auth_service.create_access_token(token_data),
+        "refresh_token": auth_service.create_refresh_token(token_data),
+        "token_type":    "bearer",
     }
 
 
+# ── refresh ─────────────────────────────────────────────────────────────────
 @router.post("/refresh")
 async def refresh_token(request: Request):
-    """Refresh access token using refresh token."""
-    
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(401, "Refresh token required")
-    
-    token = auth_header.replace("Bearer ", "")
-    
+    token = auth_header[7:]
     try:
         payload = auth_service.verify_token(token, token_type="refresh")
-        
-        new_token_data = {
-            "sub": payload["sub"],
-            "email": payload.get("email", ""),
-            "role": payload.get("role", "user"),
-            "tenant_id": payload.get("tenant_id", "default")
-        }
-        
-        access_token = auth_service.create_access_token(new_token_data)
-        
-        return {
-            "access_token": access_token,
-            "token_type": "bearer"
-        }
-    except Exception as e:
-        raise HTTPException(401, f"Invalid refresh token: {e}")
+    except Exception:
+        raise HTTPException(401, "Invalid or expired refresh token")
 
+    # Fetch fresh user from DB to get current tier/role
+    user = await user_service.get_user(payload.get("sub", ""))
+    if not user or not user.get("is_active", True):
+        raise HTTPException(401, "User not found or deactivated")
 
-@router.get("/me")
-async def get_me(current_user: dict = Depends(get_current_user)):
-    """Get current user profile."""
-    
-    user = await user_service.get_user(current_user["sub"])
-    if not user:
-        # Dev mode fallback
-        return current_user
-    
+    token_data = {
+        "sub":       user["user_id"],
+        "email":     user["email"],
+        "role":      user["role"],
+        "tier":      user.get("tier", "free"),
+        "tenant_id": user.get("tenant_id", "default"),
+    }
     return {
-        "user_id": user["user_id"],
-        "email": user["email"],
-        "username": user["username"],
-        "role": user["role"],
-        "tenant_id": user["tenant_id"],
-        "created_at": user["created_at"]
+        "access_token": auth_service.create_access_token(token_data),
+        "token_type":   "bearer",
     }
 
 
-# ========================================================
-# API Keys
-# ========================================================
+# ── /me — always fresh from DB ──────────────────────────────────────────────
+@router.get("/me")
+async def get_me(current_user: dict = Depends(get_current_user)):
+    """Returns the freshest user data from DB — always reflects current tier."""
+    user_id = current_user.get("sub")
+    if not user_id:
+        raise HTTPException(401, "Invalid session")
 
+    db_user = await user_service.get_user(user_id)
+    if db_user:
+        # Normalize: admin role gets admin tier
+        if db_user.get("role") == "admin" and db_user.get("tier", "free") == "free":
+            db_user["tier"] = "admin"
+        # Always include "sub" alias so frontend auth reads user.sub correctly
+        db_user.setdefault("sub", db_user.get("user_id", user_id))
+        return db_user
+
+    return current_user
+
+
+# ── API Keys ─────────────────────────────────────────────────────────────────
 @router.post("/api-keys")
 async def create_api_key(req: CreateAPIKeyRequest, current_user: dict = Depends(get_current_user)):
-    """Create a new API key. The key is shown ONCE — save it."""
-    
-    result = await user_service.create_api_key(
-        user_id=current_user["sub"],
-        name=req.name,
-        permissions=req.permissions,
-        expires_days=req.expires_days
-    )
-    
-    return result
+    user_id = current_user.get("sub")
+    role    = current_user.get("role", "user")
+    tier    = current_user.get("tier", "free")
+
+    if role != "admin" and tier not in ("pro", "enterprise", "admin"):
+        raise HTTPException(403, "API key access requires Pro tier or above.")
+
+    try:
+        result = await user_service.create_api_key(
+            user_id=user_id, name=req.name,
+            permissions=req.permissions, expires_days=req.expires_days,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"API key creation failed: {e}")
+        raise HTTPException(500, "Failed to create API key")
 
 
 @router.get("/api-keys")
 async def list_api_keys(current_user: dict = Depends(get_current_user)):
-    """List your API keys (keys are masked)."""
-    
     keys = await user_service.list_api_keys(current_user["sub"])
-    return {"api_keys": keys}
+    return {"keys": keys}
 
 
 @router.delete("/api-keys/{key_id}")
 async def revoke_api_key(key_id: str, current_user: dict = Depends(get_current_user)):
-    """Revoke an API key."""
-    
     revoked = await user_service.revoke_api_key(key_id, current_user["sub"])
-    
     if not revoked:
-        raise HTTPException(404, "API key not found")
-    
-    return {"message": "API key revoked", "key_id": key_id}
+        raise HTTPException(404, "API key not found or already revoked")
+    return {"status": "revoked"}
 
 
-# ========================================================
-# Scan History
-# ========================================================
-
+# ── Scan history (user-isolated) ─────────────────────────────────────────────
 @router.get("/scans")
 async def list_scans(
-    limit: int = 20,
-    offset: int = 0,
+    limit: int = 20, offset: int = 0,
     current_user: dict = Depends(get_current_user)
 ):
-    """List your scan history."""
-    
-    scans = await user_service.get_scans(current_user["sub"], limit, offset)
-    total = await user_service.get_scan_count(current_user["sub"])
-    
-    return {
-        "scans": scans,
-        "total": total,
-        "limit": limit,
-        "offset": offset
-    }
+    user_id = current_user.get("sub")
+    scans   = await user_service.get_scans(user_id, limit, offset)
+    total   = await user_service.get_scan_count(user_id)
+    return {"scans": scans, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/scans/{process_id}")
 async def get_scan(process_id: str, current_user: dict = Depends(get_current_user)):
-    """Get a specific scan with full report."""
-    
-    scan = await user_service.get_scan(process_id, current_user["sub"])
-    
+    user_id = current_user.get("sub")
+    role    = current_user.get("role", "user")
+    # Admins can see any scan; users only their own
+    scan = await user_service.get_scan(process_id, user_id if role != "admin" else None)
     if not scan:
         raise HTTPException(404, "Scan not found")
-    
     return scan
 
 
-# ========================================================
-# Findings
-# ========================================================
-
-@router.get("/scans/{process_id}/findings")
-async def get_scan_findings(process_id: str, current_user: dict = Depends(get_current_user)):
-    """Get all findings for a specific scan."""
-    findings = await user_service.get_findings(process_id, current_user["sub"])
-    return {"process_id": process_id, "findings": findings, "total": len(findings)}
-
-
+# ── Findings (user-isolated) ──────────────────────────────────────────────────
 @router.get("/findings")
-async def search_findings(
-    severity: str = None,
-    source: str = None,
-    type: str = None,
-    port: int = None,
-    search: str = None,
-    limit: int = 50,
-    offset: int = 0,
+async def list_findings(
+    severity: Optional[str] = None, source: Optional[str] = None,
+    search: Optional[str] = None, port: Optional[int] = None,
+    limit: int = 50, offset: int = 0,
     current_user: dict = Depends(get_current_user)
 ):
-    """Search findings across all scans. Supports filters: severity, source, type, port, search text."""
     return await user_service.search_findings(
         user_id=current_user["sub"],
-        severity=severity, source=source, finding_type=type,
-        port=port, search=search, limit=limit, offset=offset
+        severity=severity, source=source, port=port,
+        search=search, limit=limit, offset=offset,
     )
+
+
+@router.get("/findings/{process_id}")
+async def get_findings_for_scan(process_id: str, current_user: dict = Depends(get_current_user)):
+    return {"findings": await user_service.get_findings(process_id, current_user["sub"])}
 
 
 @router.get("/findings/stats")
 async def finding_stats(current_user: dict = Depends(get_current_user)):
-    """Get aggregated finding statistics — by severity, source, type, top ports."""
     return await user_service.get_finding_stats(current_user["sub"])

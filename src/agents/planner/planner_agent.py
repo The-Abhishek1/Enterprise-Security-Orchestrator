@@ -80,7 +80,7 @@ class PlannerAgent:
         try:
             plan_data = await asyncio.wait_for(
                 self._generate_plan_with_llm(goal, target, similar_tasks),
-                timeout=100.0  # 20 second timeout for LLM planning
+                timeout=300.0  # 5 min timeout — local Ollama (qwen2.5:3b) needs this
             )
         except asyncio.TimeoutError:
             logger.warning("LLM planning timed out, using fallback plan")

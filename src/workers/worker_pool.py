@@ -105,7 +105,11 @@ class WorkerPool:
                 self.worker_pools[tool_name] = []
             
             # Get image from config or use default
-            image = tool_config.get("image", f"{tool_name}:latest")
+            image = (
+                tool_config.get("image") or
+                tool_config.get("docker_image") or
+                f"eso-worker-{tool_name}:latest"
+            )
             
             # Create container on default bridge network (for internet access)
             container_id = await self.container_manager.create_container(

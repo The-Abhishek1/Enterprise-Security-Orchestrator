@@ -199,7 +199,7 @@ class ScheduleService:
         async with pool.acquire() as c:
             rows = await c.fetch(
                 """SELECT s.schedule_id, s.template_id, s.cron_expression, s.is_active,
-                          s.last_run_at, s.next_run_at, s.last_process_id, s.run_count,
+                          s.last_run_at, s.next_run_at, s.run_count,
                           s.max_runs, s.created_at,
                           t.name as template_name, t.target, t.goal
                    FROM scheduled_scans s
@@ -258,7 +258,7 @@ class ScheduleService:
             next_run = _parse_cron(row["cron_expression"])
             await c.execute(
                 """UPDATE scheduled_scans SET
-                   last_run_at=NOW(), next_run_at=$1, last_process_id=$2, run_count=run_count+1
+                   last_run_at=NOW(), next_run_at=$1, run_count=run_count+1
                    WHERE schedule_id=$3""",
                 next_run, process_id, schedule_id
             )

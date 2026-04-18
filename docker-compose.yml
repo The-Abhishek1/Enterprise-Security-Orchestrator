@@ -17,7 +17,7 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
       - LLM_PROVIDER=${LLM_PROVIDER:-local}
       - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://host.docker.internal:11434}
-      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-qwen2.5:7b}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-qwen2.5:3b}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:

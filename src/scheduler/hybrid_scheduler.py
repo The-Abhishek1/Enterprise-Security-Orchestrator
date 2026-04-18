@@ -115,12 +115,8 @@ class HybridScheduler:
         
         logger.info(f"📋 Scheduling execution {process_id}")
         
-        # Check quotas
-        if not await self.quota_manager.check_quota(tenant_id, user_id):
-            raise QuotaExceededError("Quota exceeded")
-        
-        # Increment usage
-        await self.quota_manager.increment_usage(tenant_id, user_id)
+        # NOTE: quota already checked + incremented by hybrid.py before calling here.
+        # Removed internal double-check — check_quota() uses legacy "free" tier fallback.
         
         # Create execution record
         execution = Execution(

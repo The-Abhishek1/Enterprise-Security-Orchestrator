@@ -7,7 +7,12 @@ from contextlib import asynccontextmanager
 import time
 import uuid
 
-from src.api.routes.v1 import hybrid, health, memory, debug, workers, stream, ui, auth, system, ws, schedules, collab, ai_chat, attack_surface
+from src.api.routes.v1 import hybrid, health, memory, debug, workers, stream, ui, auth, system, ws, schedules, collab, ai_chat, attack_surface, payments, reports
+try:
+    from src.api.routes.v1 import admin as admin_routes
+    _has_admin = True
+except ImportError:
+    _has_admin = False
 from src.api.middleware.correlation import CorrelationMiddleware
 from src.api.middleware.audit import AuditMiddleware
 from src.api.middleware.auth import AuthenticationMiddleware
@@ -38,7 +43,7 @@ from src.workers.worker_pool import WorkerPool
 from src.workers.container_manager import ContainerManager
 from src.workers.network_manager import NetworkManager
 from src.workers.resource_monitor import ResourceMonitor
-
+from src.api.routes.v1 import findings, notifications, cve, metrics
 
 settings = get_settings()
 
@@ -298,6 +303,14 @@ def create_app() -> FastAPI:
     app.include_router(stream.router, prefix=api_prefix)
     app.include_router(ws.router, prefix=api_prefix)
     app.include_router(ui.router, prefix=api_prefix)
+    app.include_router(findings.router,      prefix=api_prefix)
+    app.include_router(notifications.router, prefix=api_prefix)
+    app.include_router(cve.router,           prefix=api_prefix)
+    app.include_router(metrics.router,       prefix=api_prefix)
+    app.include_router(payments.router,      prefix=api_prefix)
+    app.include_router(reports.router,       prefix=api_prefix)
+    if _has_admin:
+        app.include_router(admin_routes.router, prefix=api_prefix)
     
     # Add memory stats endpoint for debugging
     @app.get(f"{api_prefix}/memory/stats")

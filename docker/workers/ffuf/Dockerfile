@@ -1,31 +1,22 @@
-FROM golang:1.22-alpine AS builder
+FROM debian:bookworm-slim
+LABEL maintainer="xcloak-eso" tool="ffuf"
 
-RUN apk add --no-cache git && \
-    go install github.com/ffuf/ffuf/v2@latest
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget ca-certificates procps \
+    && rm -rf /var/lib/apt/lists/*
 
-FROM alpine:3.19
+RUN wget -q https://github.com/ffuf/ffuf/releases/download/v2.1.0/ffuf_2.1.0_linux_amd64.tar.gz \
+    -O /tmp/ffuf.tar.gz \
+    && tar -xzf /tmp/ffuf.tar.gz -C /usr/local/bin ffuf \
+    && chmod +x /usr/local/bin/ffuf \
+    && rm -rf /tmp/ffuf*
 
-LABEL eso.tool="true" \
-      eso.tool.name="ffuf" \
-      eso.tool.version="2.1.0" \
-      eso.tool.command="ffuf" \
-      eso.tool.description="Fast web fuzzer for directory/file/parameter discovery" \
-      eso.tool.capabilities="directory_bruteforce,parameter_fuzzing,vhost_discovery" \
-      eso.tool.cpu="0.5" \
-      eso.tool.memory="256Mi" \
-      eso.tool.disk="100Mi" \
-      eso.tool.timeout="300"
+RUN mkdir -p /usr/share/seclists/Discovery/Web-Content && \
+    wget -q https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt \
+    -O /usr/share/seclists/Discovery/Web-Content/common.txt 2>/dev/null || \
+    printf 'index.php\nadmin\napi\nlogin\nstatic\n.env\nconfig\nbackup\n' \
+    > /usr/share/seclists/Discovery/Web-Content/common.txt
 
-COPY --from=builder /go/bin/ffuf /usr/local/bin/ffuf
-
-RUN apk add --no-cache bash curl && \
-    mkdir -p /usr/share/wordlists/dirb && \
-    wget -q -O /usr/share/wordlists/dirb/common.txt \
-      https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/common.txt && \
-    wget -q -O /usr/share/wordlists/dirb/big.txt \
-      https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/big.txt
-
+WORKDIR /scan
 RUN ffuf -V
-
-ENTRYPOINT []
 CMD ["sleep", "infinity"]

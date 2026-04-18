@@ -1,33 +1,22 @@
-FROM projectdiscovery/nuclei:latest AS nuclei-bin
+FROM debian:bookworm-slim
+LABEL maintainer="xcloak-eso" tool="nuclei"
 
-FROM alpine:3.19
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget ca-certificates curl unzip procps git \
+    && rm -rf /var/lib/apt/lists/*
 
-LABEL eso.tool="true" \
-      eso.tool.name="nuclei" \
-      eso.tool.version="3.1.0" \
-      eso.tool.command="nuclei" \
-      eso.tool.description="Fast vulnerability scanner" \
-      eso.tool.capabilities="vuln_scan,template_based,web_scan" \
-      eso.tool.cpu="1.0" \
-      eso.tool.memory="1Gi" \
-      eso.tool.disk="500Mi" \
-      eso.tool.timeout="1200"
+# Install nuclei binary
+RUN wget -q https://github.com/projectdiscovery/nuclei/releases/download/v3.2.4/nuclei_3.2.4_linux_amd64.zip \
+    -O /tmp/nuclei.zip \
+    && unzip /tmp/nuclei.zip -d /tmp/ \
+    && mv /tmp/nuclei /usr/local/bin/nuclei \
+    && chmod +x /usr/local/bin/nuclei \
+    && rm -rf /tmp/nuclei*
 
-RUN apk add --no-cache \
-    bash \
-    curl \
-    ca-certificates \
-    bind-tools \
-    git
+WORKDIR /scan
 
-# Copy nuclei binary from official image
-COPY --from=nuclei-bin /usr/local/bin/nuclei /usr/local/bin/nuclei
-
-# Pre-download templates so first scan doesn't waste 60s
+# Pre-download templates (speeds up first scan)
 RUN nuclei -update-templates 2>/dev/null || true
-
-# Verify
 RUN nuclei -version
 
-ENTRYPOINT []
 CMD ["sleep", "infinity"]

@@ -106,10 +106,23 @@ class ToolRouter:
         )
         
         if not available_tools:
-            raise ToolExecutionError(
-                message=f"No tool found for capability: {capability_value}",
-                tool="unknown"
-            )
+            # Fallback: look up tool directly by name from params
+            tool_name_direct = params.get("tool")
+            if tool_name_direct:
+                direct_tool = await self.tool_registry.get_tool(tool_name_direct)
+                if direct_tool:
+                    logger.info(f"⚡ Direct tool lookup fallback: {tool_name_direct} (capability '{capability_value}' not indexed)")
+                    available_tools = [direct_tool]
+                else:
+                    raise ToolExecutionError(
+                        message=f"No tool found for capability: {capability_value} (tool: {tool_name_direct})",
+                        tool=tool_name_direct
+                    )
+            else:
+                raise ToolExecutionError(
+                    message=f"No tool found for capability: {capability_value}",
+                    tool="unknown"
+                )
         
         # Check rate limits
         if self.rate_limiter:
@@ -300,10 +313,52 @@ class ToolRouter:
         )
     
     def _prepare_tool_args(self, tool: Dict, params: Dict[str, Any]) -> List[str]:
-        """Prepare command-line arguments for tool"""
+        """Prepare command-line arguments for tool.
         
+        If AI planner supplied extra_args (pre-split flags), use those directly
+        and append target in the correct position for each tool type.
+        This avoids double-flag issues from the generic param_mapping logic.
+        """
         args = []
-        
+        tool_name = tool.get("name", "")
+        target = params.get("target") or params.get("url") or params.get("host")
+
+        # If AI planner supplied pre-split flags, use them directly
+        extra_args = params.get("extra_args")
+        if extra_args:
+            if isinstance(extra_args, list):
+                args.extend(extra_args)
+            elif isinstance(extra_args, str):
+                args.extend(extra_args.split())
+            # Add target at the correct position for each tool
+            if target:
+                if tool_name in ("nmap",):
+                    if target not in args:
+                        args.append(target)
+                elif tool_name in ("nuclei",):
+                    if "-u" not in args and "-target" not in args:
+                        args.extend(["-u", target])
+                elif tool_name in ("gobuster",):
+                    if "-u" not in args:
+                        args.extend(["-u", target])
+                elif tool_name in ("nikto",):
+                    if "-h" not in args:
+                        args.extend(["-h", target])
+                elif tool_name in ("whatweb",):
+                    if target not in args:
+                        args.append(target)
+                elif tool_name in ("ffuf",):
+                    if "-u" not in args:
+                        args.extend(["-u", f"{target}/FUZZ"])
+                elif tool_name in ("sqlmap",):
+                    if "-u" not in args:
+                        args.extend(["-u", target])
+                else:
+                    if target not in args:
+                        args.append(target)
+            logger.debug(f"Args (AI flags) for {tool_name}: {args}")
+            return args
+
         # Add base command if present
         if "base_command" in tool and tool["base_command"]:
             if isinstance(tool["base_command"], list):

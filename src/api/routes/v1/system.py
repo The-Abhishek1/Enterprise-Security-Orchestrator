@@ -20,6 +20,63 @@ class LLMSwitchRequest(BaseModel):
     model: Optional[str] = None
 
 
+
+
+class LLMConfigRequest(BaseModel):
+    provider: str
+    model: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+
+
+@router.get("/llm-config")
+async def get_llm_config(current_user: dict = Depends(get_current_user)):
+    """Return current LLM configuration for the settings page."""
+    provider = llm_factory.default_provider
+    try:
+        client = llm_factory.get_client()
+        model = getattr(client, "model_name", settings.local_llm_model)
+    except Exception:
+        model = settings.local_llm_model
+    return {
+        "provider": provider,
+        "model":    model,
+        "local_url": settings.local_llm_url,
+        "has_openai_key":     bool(settings.openai_api_key),
+        "has_anthropic_key":  bool(settings.anthropic_api_key),
+    }
+
+
+@router.post("/llm-config")
+async def save_llm_config(
+    req: LLMConfigRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Save LLM configuration — switches provider and optionally stores API keys in memory."""
+    provider = req.provider.lower()
+    if provider not in ("openai", "local", "anthropic"):
+        raise HTTPException(400, f"Unknown provider: {provider}")
+
+    # Update API keys in settings object (runtime only — not persisted to .env)
+    if req.openai_api_key:
+        settings.openai_api_key = req.openai_api_key
+    if req.anthropic_api_key:
+        settings.anthropic_api_key = req.anthropic_api_key
+
+    old_provider = llm_factory.default_provider
+    llm_factory.default_provider = provider
+    llm_factory.clients.clear()
+
+    try:
+        client = llm_factory.get_client(provider=provider, model_name=req.model)
+        model  = getattr(client, "model_name", req.model or "unknown")
+        logger.info(f"⚙️ LLM config saved: {old_provider} → {provider} ({model})")
+        return {"provider": provider, "model": model, "message": f"LLM set to {provider} ({model})"}
+    except Exception as e:
+        llm_factory.default_provider = old_provider
+        llm_factory.clients.clear()
+        raise HTTPException(400, f"Failed to initialise {provider}: {e}")
+
 @router.get("/info")
 async def system_info(current_user: dict = Depends(get_current_user)):
     """System info — LLM provider, tools, health."""
