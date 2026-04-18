@@ -1,94 +1,128 @@
-.PHONY: setup dev build clean infra tools frontend help db-init db-reset db-check db-shell db-upgrade-user
+.PHONY: setup dev build clean infra tools db-init db-reset db-check db-shell db-upgrade-user help
 
-help: ## Show help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+help: ## Show all commands
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
-# ===== Setup =====
+# ── Setup ──────────────────────────────────────────────────────────
 
-setup: infra venv tools db-init ## Full setup — infra + venv + tools + db
+setup: infra venv tools db-init ## Full first-time setup
 	@echo "\n✅ Setup complete! Run: make dev"
 
-venv: ## Create Python venv and install deps
+venv: ## Create Python venv + install deps
 	python3 -m venv venv
 	./venv/bin/pip install --upgrade pip
 	./venv/bin/pip install -r requirements.txt
-	@echo "✅ Python venv ready"
+	@echo "✅ venv ready"
 
-infra: ## Start PostgreSQL, Redis, RabbitMQ
+infra: ## Start PostgreSQL, Redis, RabbitMQ via Docker
+	@if [ ! -f .env ]; then echo "❌ .env not found — copy .env.example and fill in values" && exit 1; fi
 	docker compose up -d postgres redis rabbitmq
-	@echo "Waiting for services to be healthy..."
-	@sleep 8
+	@echo "Waiting for services..."
+	@sleep 10
 	@echo "✅ Infrastructure ready"
 
-tools: ## Build all security tool Docker images
+tools: ## Build all 7 security tool Docker images
 	bash build_workers.sh
 	@echo "✅ Tool images built"
 
-# ===== Development =====
+# ── Development ────────────────────────────────────────────────────
 
-dev: ## Run backend (dev mode with reload)
+dev: ## Run backend in dev mode (hot reload)
 	./venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload
 
+dev-log: ## Run with structured JSON logging
+	./venv/bin/uvicorn src.api.app:app --host 0.0.0.0 --port 8000 --reload --log-config config/logging.json
 
-# ===== Docker (production) =====
+# ── Docker (production) ────────────────────────────────────────────
 
-build: ## Build all Docker images (backend + tools)
-	docker compose build
+build: ## Build backend Docker image
+	docker compose build api
 	bash build_workers.sh
 	@echo "✅ All images built"
 
-up: ## Start everything in Docker
+up: ## Start full stack in Docker
+	@if [ ! -f .env ]; then echo "❌ .env not found" && exit 1; fi
 	docker compose up -d
 	@echo "✅ ESO running at http://localhost:8000"
-	@echo "   Frontend: http://localhost:3000"
 
-down: ## Stop everything
+down: ## Stop all containers
 	docker compose down
 
-logs: ## Tail backend logs
+restart: ## Restart just the API container
+	docker compose restart api
+
+logs: ## Tail API logs
 	docker compose logs -f api
 
-# ===== Database =====
+logs-all: ## Tail all service logs
+	docker compose logs -f
 
-db-init: ## Create all tables + seed tiers + dev user
-	@echo "Initializing database..."
-	@mkdir -p scripts
-	@./venv/bin/python3 scripts/db_init.py
+ps: ## Show container status
+	docker compose ps
 
-db-reset: ## Drop ALL tables (run db-init after to recreate)
-	@echo "⚠️  Dropping all tables..."
-	@docker exec $$(docker compose ps -q postgres) psql -U eso -d orchestrator -c "\
-		DROP TABLE IF EXISTS ai_chats, finding_comments, team_members, teams, \
+# ── Database ───────────────────────────────────────────────────────
+
+db-init: ## Create tables + seed tiers + dev user
+	@echo "Initialising database..."
+	@./venv/bin/python3 -c "import asyncio; from src.core.database import db_manager; from src.core.schema import init_schema; asyncio.run(db_manager.initialize()); asyncio.run(init_schema(db_manager.pg_pool))"
+	@echo "✅ Database ready"
+
+db-reset: ## ⚠️  Drop ALL tables (irreversible)
+	@read -p "Type 'yes' to drop all tables: " confirm; \
+		[ "$$confirm" = "yes" ] || (echo "Aborted" && exit 1)
+	docker exec $$(docker compose ps -q postgres) psql -U eso -d orchestrator -c "\
+		DROP TABLE IF EXISTS payments, ai_chats, finding_comments, team_members, teams, \
 		scheduled_scans, scan_templates, target_rules, audit_logs, \
 		findings, scan_history, api_keys, tier_config, users CASCADE;"
 	@echo "Tables dropped. Run: make db-init"
 
-db-check: ## Verify tables, tiers, and users
-	@echo "=== Tables ==="
+db-check: ## Show tables, tiers, and users
+	@echo "\n=== Tables ==="
 	@docker exec $$(docker compose ps -q postgres) psql -U eso -d orchestrator -c "\dt"
 	@echo "\n=== Tier Config ==="
 	@docker exec $$(docker compose ps -q postgres) psql -U eso -d orchestrator -c \
-		"SELECT tier, scans_per_day, max_concurrent, ai_analysis_enabled, proposals_enabled FROM tier_config ORDER BY scans_per_day;"
+		"SELECT tier, scans_per_day, max_concurrent, ai_analysis_enabled, pdf_reports_enabled FROM tier_config ORDER BY scans_per_day;"
 	@echo "\n=== Users ==="
 	@docker exec $$(docker compose ps -q postgres) psql -U eso -d orchestrator -c \
-		"SELECT user_id, username, role, tier, scans_today, total_scans FROM users;"
+		"SELECT user_id, username, email, role, tier, scans_today, total_scans FROM users;"
 
-db-shell: ## Open PostgreSQL shell
+db-shell: ## Open PostgreSQL interactive shell
 	docker exec -it $$(docker compose ps -q postgres) psql -U eso -d orchestrator
 
-db-upgrade-user: ## Upgrade a user tier — usage: make db-upgrade-user USER=user_xxx TIER=pro
+db-backup: ## Backup database to ./backups/
+	@mkdir -p backups
+	docker exec $$(docker compose ps -q postgres) pg_dump -U eso orchestrator \
+		> backups/eso_$$(date +%Y%m%d_%H%M%S).sql
+	@echo "✅ Backup saved to backups/"
+
+db-upgrade-user: ## Upgrade a user tier: make db-upgrade-user USER=user_xxx TIER=pro
 	@[ "$(USER)" ] || (echo "Usage: make db-upgrade-user USER=user_id TIER=pro|enterprise|admin" && exit 1)
 	@[ "$(TIER)" ] || (echo "Usage: make db-upgrade-user USER=user_id TIER=pro|enterprise|admin" && exit 1)
-	@docker exec $$(docker compose ps -q postgres) psql -U eso -d orchestrator -c \
-		"UPDATE users SET tier='$(TIER)', role='$(TIER)', updated_at=NOW() WHERE user_id='$(USER)' RETURNING user_id, username, tier;"
+	docker exec $$(docker compose ps -q postgres) psql -U eso -d orchestrator -c \
+		"UPDATE users SET tier='$(TIER)', updated_at=NOW() WHERE user_id='$(USER)' RETURNING user_id, username, tier;"
 	@echo "✅ Done"
 
-# ===== Cleanup =====
+# ── Cleanup ────────────────────────────────────────────────────────
 
-clean: ## Remove venv, node_modules, __pycache__
-	rm -rf venv eso-frontend/node_modules eso-frontend/.next
+clean: ## Remove venv, caches
+	rm -rf venv
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@echo "✅ Cleaned"
 
-workers-clean: ## Remove all ESO worker containers and networks
-	bash cleanup_workers.sh
+clean-docker: ## Remove all ESO containers, volumes, images
+	@read -p "Remove all ESO Docker data? (yes/no): " c; \
+		[ "$$c" = "yes" ] || (echo "Aborted" && exit 1)
+	docker compose down -v --remove-orphans
+	bash cleanup_workers.sh 2>/dev/null || true
+	@echo "✅ Docker data removed"
+
+# ── Secrets ────────────────────────────────────────────────────────
+
+gen-secrets: ## Generate new strong secrets for .env
+	@echo "# Paste these into your .env file:"
+	@echo "JWT_SECRET_KEY=$$(python3 -c 'import secrets; print(secrets.token_urlsafe(64))')"
+	@echo "POSTGRES_PASSWORD=$$(python3 -c 'import secrets,string; chars=string.ascii_letters+string.digits+\"!@#\$\"; print(\"\".join(secrets.choice(chars) for _ in range(32)))')"
+	@echo "REDIS_PASSWORD=$$(python3 -c 'import secrets,string; chars=string.ascii_letters+string.digits; print(\"\".join(secrets.choice(chars) for _ in range(24)))')"
+	@echo "RABBITMQ_PASSWORD=$$(python3 -c 'import secrets,string; chars=string.ascii_letters+string.digits; print(\"\".join(secrets.choice(chars) for _ in range(24)))')"

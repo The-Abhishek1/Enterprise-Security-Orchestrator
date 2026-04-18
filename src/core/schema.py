@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS cves (
     severity     VARCHAR(20)  DEFAULT 'unknown', -- critical/high/medium/low
     published_at TIMESTAMP,
     modified_at  TIMESTAMP,
-    references   TEXT[],
+    "references" TEXT[],
     cpe_list     TEXT[],                         -- affected products
     -- Xcloak enrichment
     has_exploit  BOOLEAN      DEFAULT FALSE,

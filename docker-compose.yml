@@ -1,7 +1,13 @@
 version: '3.8'
 
+# ================================================================
+# Enterprise Security Orchestrator — docker-compose.yml
+# All secrets pulled from .env — never hardcoded here
+# ================================================================
+
 services:
-  # ===== Backend API =====
+
+  # ── Backend API ────────────────────────────────────────────────
   api:
     build:
       context: .
@@ -9,17 +15,27 @@ services:
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
-      - ENVIRONMENT=${ENVIRONMENT:-development}
-      - POSTGRES_DSN=postgresql://eso:eso_secret@postgres:5432/orchestrator
-      - REDIS_DSN=redis://redis:6379/0
-      - RABBITMQ_DSN=amqp://guest:guest@rabbitmq:5672/
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
-      - LLM_PROVIDER=${LLM_PROVIDER:-local}
-      - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://host.docker.internal:11434}
-      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-qwen2.5:3b}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-change-me-in-production}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      ENVIRONMENT:          ${ENVIRONMENT:-development}
+      JWT_SECRET_KEY:       ${JWT_SECRET_KEY}
+      JWT_ALGORITHM:        ${JWT_ALGORITHM:-HS256}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      POSTGRES_DSN:         postgresql://eso:${POSTGRES_PASSWORD}@postgres:5432/orchestrator
+      REDIS_DSN:            redis://:${REDIS_PASSWORD}@redis:6379/0
+      RABBITMQ_DSN:         amqp://${RABBITMQ_USER:-eso_admin}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+      LLM_PROVIDER:         ${LLM_PROVIDER:-local}
+      LOCAL_LLM_URL:        ${LOCAL_LLM_URL:-http://host.docker.internal:11434}
+      LOCAL_LLM_MODEL:      ${LOCAL_LLM_MODEL:-qwen2.5:3b}
+      OPENAI_API_KEY:       ${OPENAI_API_KEY:-}
+      OPENAI_MODEL:         ${OPENAI_MODEL:-gpt-4o}
+      ANTHROPIC_API_KEY:    ${ANTHROPIC_API_KEY:-}
+      RAZORPAY_KEY_ID:      ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET:  ${RAZORPAY_KEY_SECRET:-}
+      CORS_ORIGINS:         ${CORS_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT_ENABLED:   ${RATE_LIMIT_ENABLED:-true}
+      ALLOW_PRIVATE_TARGETS: ${ALLOW_PRIVATE_TARGETS:-false}
+      LOG_LEVEL:            ${LOG_LEVEL:-INFO}
+      SERVICE_NAME:         ${SERVICE_NAME:-enterprise-orchestrator}
+      SLACK_WEBHOOK_URL:    ${SLACK_WEBHOOK_URL:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config:/app/config:ro
@@ -35,75 +51,93 @@ services:
       - eso-internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
-  # ===== Frontend =====
-  frontend:
-    build:
-      context: ./eso-frontend
-      dockerfile: Dockerfile
-    ports:
-      - "${FRONTEND_PORT:-3000}:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://api:8000
-    depends_on:
-      - api
-    restart: unless-stopped
-    networks:
-      - eso-internal
-
-  # ===== Infrastructure =====
+  # ── PostgreSQL ─────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: orchestrator
-      POSTGRES_USER: eso
-      POSTGRES_PASSWORD: eso_secret
+      POSTGRES_DB:       orchestrator
+      POSTGRES_USER:     eso
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Harden: no anonymous connections
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"   # localhost-only — not exposed to internet
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U eso -d orchestrator"]
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
     networks:
       - eso-internal
 
+  # ── Redis ──────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1
+      --loglevel warning
     volumes:
       - redis_data:/data
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"   # localhost-only
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
     networks:
       - eso-internal
 
+  # ── RabbitMQ ───────────────────────────────────────────────────
   rabbitmq:
     image: rabbitmq:3-management-alpine
-    ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-eso_admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: /
+      # Remove default guest account
+      RABBITMQ_NODENAME: rabbit@rabbitmq
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "127.0.0.1:${RABBITMQ_PORT:-5672}:5672"       # localhost-only
+      - "127.0.0.1:${RABBITMQ_MGMT_PORT:-15672}:15672" # management UI localhost-only
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
     networks:
       - eso-internal
 
 volumes:
   postgres_data:
+    driver: local
   redis_data:
+    driver: local
   rabbitmq_data:
+    driver: local
 
 networks:
   eso-internal:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16   # fixed subnet — predictable firewall rules
