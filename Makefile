@@ -63,10 +63,8 @@ ps: ## Show container status
 
 # ── Database ───────────────────────────────────────────────────────
 
-db-init: ## Create tables + seed tiers + dev user
-	@echo "Initialising database..."
-	@./venv/bin/python3 -c "import asyncio; from src.core.database import db_manager; from src.core.schema import init_schema; asyncio.run(db_manager.initialize()); asyncio.run(init_schema(db_manager.pg_pool))"
-	@echo "✅ Database ready"
+db-init: ## Create all ESO tables + apply migrations (safe to re-run)
+	@./venv/bin/python3 scripts/db_init.py
 
 db-reset: ## ⚠️  Drop ALL tables (irreversible)
 	@read -p "Type 'yes' to drop all tables: " confirm; \

@@ -181,6 +181,20 @@ async def verify_payment(
         logger.warning("Payment log insert failed (non-critical): %s", e)
 
     logger.info("Payment verified - user %s upgraded to %s", user_id, tier)
+
+    # Send payment confirmation email
+    try:
+        from src.services.email_service import send_payment_confirmed
+        async with pool.acquire() as conn:
+            u = await conn.fetchrow("SELECT email, username FROM users WHERE user_id=$1", user_id)
+        if u and u["email"]:
+            await send_payment_confirmed(
+                u["email"], u["username"], tier,
+                TIER_PRICES[tier]["amount"], req.razorpay_payment_id
+            )
+    except Exception as e:
+        logger.warning("Payment email failed (non-critical): %s", e)
+
     return {
         "success": True,
         "tier": tier,

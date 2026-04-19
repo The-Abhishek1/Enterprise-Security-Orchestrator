@@ -40,3 +40,6 @@ PyYAML==6.0.2
 psutil
 numpy
 asyncpg
+
+# Email
+aiosmtplib==3.0.1

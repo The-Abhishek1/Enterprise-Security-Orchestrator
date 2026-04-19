@@ -12,12 +12,13 @@ Fixes vs original:
 from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 
 from src.api.dependencies import get_current_user, auth_service
 from src.services.user_service import user_service
 from src.utils.logging import logger
+from src.core.database import db_manager
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -75,6 +76,13 @@ async def register(req: RegisterRequest):
             raise HTTPException(409, "Email or username already taken")
         logger.error(f"Registration failed: {e}")
         raise HTTPException(500, "Registration failed")
+
+    # Send welcome email (non-blocking)
+    try:
+        from src.services.email_service import send_welcome
+        await send_welcome(req.email, req.username)
+    except Exception as e:
+        logger.warning("Welcome email failed (non-critical): %s", e)
 
     token_data = {
         "sub":       user["user_id"],
@@ -257,3 +265,98 @@ async def get_findings_for_scan(process_id: str, current_user: dict = Depends(ge
 @router.get("/findings/stats")
 async def finding_stats(current_user: dict = Depends(get_current_user)):
     return await user_service.get_finding_stats(current_user["sub"])
+
+
+# ── forgot password ──────────────────────────────────────────────────────────
+@router.post("/forgot-password")
+async def forgot_password(request: Request):
+    """Send password reset email. Always returns 200 to prevent enumeration."""
+    import os, hmac, hashlib, secrets as sec
+    from datetime import datetime, timedelta
+
+    try:
+        body = await request.json()
+        email = (body.get("email") or "").strip().lower()
+        if not email:
+            return {"ok": True, "message": "If that email exists, a reset link will be sent."}
+
+        pool = db_manager.pg_pool
+        if not pool:
+            return {"ok": True}
+
+        async with pool.acquire() as conn:
+            user = await conn.fetchrow(
+                "SELECT user_id, username, email FROM users WHERE email=$1", email
+            )
+
+        if user:
+            token = sec.token_urlsafe(32)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+            expires = datetime.utcnow() + timedelta(minutes=30)
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """UPDATE users SET reset_token=$1, reset_expires=$2 WHERE user_id=$3""",
+                    token_hash, expires, user["user_id"]
+                )
+
+            app_url = os.getenv("XCLOAK_URL", "https://xcloak.tech")
+            reset_url = f"{app_url}/reset-password?token={token}&email={email}"
+
+            # Send email directly via SMTP
+            try:
+                from src.services.email_service import send_password_reset
+                await send_password_reset(email, user["username"], reset_url)
+            except Exception as e:
+                logger.warning("Email send failed (non-critical): %s", e)
+
+    except Exception as e:
+        logger.error("forgot_password error: %s", e)
+
+    return {"ok": True, "message": "If that email exists, a reset link has been sent."}
+
+
+@router.post("/reset-password")
+async def reset_password(request: Request):
+    """Verify reset token and update password."""
+    import hashlib
+    from datetime import datetime
+
+    body = await request.json()
+    email    = (body.get("email") or "").strip().lower()
+    token    = (body.get("token") or "").strip()
+    new_pass = (body.get("password") or "").strip()
+
+    if not all([email, token, new_pass]) or len(new_pass) < 8:
+        raise HTTPException(400, "email, token, and password (min 8 chars) required")
+
+    pool = db_manager.pg_pool
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow(
+            """SELECT user_id, username, reset_token, reset_expires
+               FROM users WHERE email=$1""",
+            email
+        )
+
+    if not user or user["reset_token"] != token_hash:
+        raise HTTPException(400, "Invalid or expired reset link")
+
+    if user["reset_expires"] and user["reset_expires"] < datetime.utcnow():
+        raise HTTPException(400, "Reset link has expired — request a new one")
+
+    # Hash new password and clear token
+    new_hash = await user_service.hash_password(new_pass)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE users SET password_hash=$1, reset_token=NULL, reset_expires=NULL
+               WHERE user_id=$2""",
+            new_hash, user["user_id"]
+        )
+
+    return {"ok": True, "message": "Password updated successfully"}
+

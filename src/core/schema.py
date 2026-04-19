@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS users (
     scans_today_reset TIMESTAMP DEFAULT NOW(),
     total_scans INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at    TIMESTAMP DEFAULT NOW(),
+    reset_token   TEXT,
+    reset_expires TIMESTAMP
 );
 
 -- ═══════════════════════════════════════════════
