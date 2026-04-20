@@ -255,6 +255,20 @@ CREATE INDEX IF NOT EXISTS idx_cves_cvss_score ON cves(cvss_score DESC);
 CREATE INDEX IF NOT EXISTS idx_cves_last_seen  ON cves(last_seen_at DESC);
 
 -- ═══════════════════════════════════════════════
+-- SITE SETTINGS (admin-controlled toggles)
+-- ═══════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS site_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Default: razorpay mode
+INSERT INTO site_settings (key, value)
+VALUES ('payment_mode', 'razorpay')
+ON CONFLICT (key) DO NOTHING;
+
+-- ═══════════════════════════════════════════════
 -- CVE ↔ SCAN MAPPING (which scans found which CVEs)
 -- ═══════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS scan_cve_matches (

@@ -229,3 +229,103 @@ async def list_payments(
         logger.error(f"Admin payments query failed: {e}")
         # Return empty gracefully rather than 500 — payments table may not exist yet
         return {"payments": [], "total": 0, "error": str(e)}
+
+
+# ── Payment Mode (UPI / Razorpay toggle) ─────────────────────────────────────
+
+class PaymentModeRequest(BaseModel):
+    mode: str  # 'razorpay' or 'upi'
+
+@router.get("/settings/payment-mode")
+async def get_payment_mode(current_user: dict = Depends(admin_only)):
+    """Get current payment mode — razorpay or upi."""
+    pool = db_manager.pg_pool
+    if not pool:
+        return {"mode": "razorpay"}
+    async with pool.acquire() as c:
+        row = await c.fetchrow("SELECT value FROM site_settings WHERE key='payment_mode'")
+    return {"mode": row["value"] if row else "razorpay"}
+
+
+@router.post("/settings/payment-mode")
+async def set_payment_mode(
+    req: PaymentModeRequest,
+    current_user: dict = Depends(admin_only)
+):
+    """Toggle payment mode between razorpay and upi."""
+    if req.mode not in ("razorpay", "upi"):
+        raise HTTPException(400, "mode must be 'razorpay' or 'upi'")
+    pool = db_manager.pg_pool
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+    async with pool.acquire() as c:
+        await c.execute(
+            """INSERT INTO site_settings (key, value, updated_at)
+               VALUES ('payment_mode', $1, NOW())
+               ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()""",
+            req.mode
+        )
+    logger.info(f"Payment mode set to {req.mode} by {current_user.get('username')}")
+    return {"ok": True, "mode": req.mode}
+
+
+# ── Manual UPI Payment Recording ─────────────────────────────────────────────
+
+class UPIPaymentRequest(BaseModel):
+    user_id: str
+    tier: str
+    amount: int          # in paise e.g. 99900 for ₹999
+    utr_number: str      # UPI transaction reference
+    note: Optional[str] = None
+
+@router.post("/payments/upi")
+async def record_upi_payment(
+    req: UPIPaymentRequest,
+    current_user: dict = Depends(admin_only)
+):
+    """Admin records a manual UPI payment and upgrades user tier."""
+    if req.tier not in VALID_TIERS:
+        raise HTTPException(400, f"Invalid tier: {req.tier}")
+    pool = db_manager.pg_pool
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    import uuid as _uuid
+    payment_id = f"upi_{req.utr_number}"
+    order_id   = f"manual_{_uuid.uuid4().hex[:12]}"
+
+    async with pool.acquire() as c:
+        # Record payment
+        await c.execute(
+            """INSERT INTO payments (payment_id, order_id, user_id, tier, amount, status, paid_at)
+               VALUES ($1, $2, $3, $4, $5, 'captured', NOW())
+               ON CONFLICT (payment_id) DO NOTHING""",
+            payment_id, order_id, req.user_id, req.tier, req.amount
+        )
+        # Upgrade user tier
+        await c.execute(
+            "UPDATE users SET tier=$1, role=$2, updated_at=NOW() WHERE user_id=$3",
+            req.tier,
+            "admin" if req.tier == "admin" else req.tier,
+            req.user_id
+        )
+
+    logger.info(
+        f"UPI payment recorded: user={req.user_id} tier={req.tier} "
+        f"amount={req.amount} utr={req.utr_number} by admin={current_user.get('username')}"
+    )
+    return {"ok": True, "payment_id": payment_id, "tier": req.tier}
+
+
+@router.get("/settings/payment-mode/public")
+async def get_payment_mode_public():
+    """Public endpoint — frontend checks this to show UPI or Razorpay."""
+    pool = db_manager.pg_pool
+    if not pool:
+        return {"mode": "razorpay"}
+    try:
+        async with pool.acquire() as c:
+            row = await c.fetchrow("SELECT value FROM site_settings WHERE key='payment_mode'")
+        return {"mode": row["value"] if row else "razorpay"}
+    except Exception:
+        return {"mode": "razorpay"}
