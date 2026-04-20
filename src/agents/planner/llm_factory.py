@@ -209,12 +209,81 @@ class LocalLLMClient(BaseLLMClient):
             return {}
 
 
+class GroqClient(BaseLLMClient):
+    """Groq API client — OpenAI-compatible, free tier available"""
+
+    def __init__(self, api_key: str, model_name: str = "llama-3.1-8b-instant", **kwargs):
+        super().__init__(model_name, **kwargs)
+        self.api_key  = api_key
+        self.base_url = "https://api.groq.com/openai/v1/chat/completions"
+
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type":  "application/json",
+        }
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        data = {
+            "model":       self.model_name,
+            "messages":    messages,
+            "temperature": self.temperature,
+            "max_tokens":  self.max_tokens,
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(self.base_url, headers=headers, json=data) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"Groq API error {response.status}: {error_text}")
+                result = await response.json()
+                return result["choices"][0]["message"]["content"]
+
+    async def generate_json(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
+        system = (system_prompt or "") + "\nYou must respond with valid JSON only."
+        response = await self.generate(prompt, system)
+        try:
+            return json.loads(response)
+        except json.JSONDecodeError:
+            import re
+            m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response)
+            if m:
+                try:
+                    return json.loads(m.group(1))
+                except json.JSONDecodeError:
+                    pass
+            m = re.search(r'(\{[\s\S]*\})', response)
+            if m:
+                try:
+                    return json.loads(m.group(1))
+                except json.JSONDecodeError:
+                    pass
+            logger.warning(f"Could not parse JSON from Groq response: {response[:200]}")
+            return {}
+
+
 class LLMFactory:
-    """Factory for creating LLM clients"""
+    """Factory for creating LLM clients — auto-selects best available provider"""
     
     def __init__(self):
         self.clients = {}
-        self.default_provider = settings.llm_provider.value
+        configured = settings.llm_provider.value
+        if configured != "local":
+            self.default_provider = configured
+        else:
+            # Auto-detect best provider: Groq (free+fast) > OpenAI > Anthropic > Local
+            groq_key = getattr(settings, "groq_api_key", None)
+            if groq_key:
+                self.default_provider = "groq"
+            elif settings.openai_api_key:
+                self.default_provider = "openai"
+            elif settings.anthropic_api_key:
+                self.default_provider = "anthropic"
+            else:
+                self.default_provider = "local"
         logger.info(f"✅ LLM Factory initialized with default provider: {self.default_provider}")
     
     def get_client(
@@ -248,6 +317,12 @@ class LLMFactory:
             client = LocalLLMClient(
                 base_url=kwargs.get("base_url", settings.local_llm_url),
                 model_name=model_name or settings.local_llm_model,
+                **kwargs
+            )
+        elif provider == "groq":
+            client = GroqClient(
+                api_key=kwargs.get("api_key", getattr(settings, "groq_api_key", "")),
+                model_name=model_name or getattr(settings, "groq_model", "llama-3.1-8b-instant"),
                 **kwargs
             )
         else:

@@ -27,6 +27,7 @@ class LLMConfigRequest(BaseModel):
     model: Optional[str] = None
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
 
 
 @router.get("/llm-config")
@@ -42,8 +43,9 @@ async def get_llm_config(current_user: dict = Depends(get_current_user)):
         "provider": provider,
         "model":    model,
         "local_url": settings.local_llm_url,
-        "has_openai_key":     bool(settings.openai_api_key),
-        "has_anthropic_key":  bool(settings.anthropic_api_key),
+        "has_openai_key":    bool(settings.openai_api_key),
+        "has_anthropic_key": bool(settings.anthropic_api_key),
+        "has_groq_key":      bool(getattr(settings, 'groq_api_key', None)),
     }
 
 
@@ -54,7 +56,7 @@ async def save_llm_config(
 ):
     """Save LLM configuration — switches provider and optionally stores API keys in memory."""
     provider = req.provider.lower()
-    if provider not in ("openai", "local", "anthropic"):
+    if provider not in ("openai", "local", "anthropic", "groq"):
         raise HTTPException(400, f"Unknown provider: {provider}")
 
     # Update API keys in settings object (runtime only — not persisted to .env)
@@ -62,6 +64,8 @@ async def save_llm_config(
         settings.openai_api_key = req.openai_api_key
     if req.anthropic_api_key:
         settings.anthropic_api_key = req.anthropic_api_key
+    if req.groq_api_key:
+        settings.groq_api_key = req.groq_api_key
 
     old_provider = llm_factory.default_provider
     llm_factory.default_provider = provider
@@ -98,7 +102,7 @@ async def system_info(current_user: dict = Depends(get_current_user)):
 @router.post("/llm/switch")
 async def switch_llm(req: LLMSwitchRequest, current_user: dict = Depends(get_current_user)):
     """Switch LLM provider at runtime (openai ↔ local)."""
-    if req.provider not in ["openai", "local", "anthropic"]:
+    if req.provider not in ["openai", "local", "anthropic", "groq"]:
         raise HTTPException(400, f"Unknown provider: {req.provider}")
     
     old = llm_factory.default_provider
