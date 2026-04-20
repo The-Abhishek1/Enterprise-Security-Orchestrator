@@ -259,8 +259,8 @@ class ScheduleService:
             await c.execute(
                 """UPDATE scheduled_scans SET
                    last_run_at=NOW(), next_run_at=$1, run_count=run_count+1
-                   WHERE schedule_id=$3""",
-                next_run, process_id, schedule_id
+                   WHERE schedule_id=$2""",
+                next_run, schedule_id
             )
 
 

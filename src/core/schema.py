@@ -23,9 +23,9 @@ CREATE TABLE IF NOT EXISTS users (
     scans_today_reset TIMESTAMP DEFAULT NOW(),
     total_scans INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at    TIMESTAMP DEFAULT NOW(),
-    reset_token   TEXT,
-    reset_expires TIMESTAMP
+    reset_token         VARCHAR(255),
+    reset_token_expires TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
 -- ═══════════════════════════════════════════════
@@ -166,7 +166,11 @@ CREATE TABLE IF NOT EXISTS scan_templates (
     description TEXT,
     target VARCHAR(500) NOT NULL,
     goal TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW()
+    parameters TEXT DEFAULT '{}',
+    tags TEXT[] DEFAULT ARRAY[]::TEXT[],
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS scheduled_scans (
@@ -202,6 +206,7 @@ CREATE TABLE IF NOT EXISTS team_members (
     team_id VARCHAR(64) NOT NULL REFERENCES teams(team_id) ON DELETE CASCADE,
     user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     role VARCHAR(20) DEFAULT 'member',
+    invited_by VARCHAR(64),
     joined_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(team_id, user_id)
 );
@@ -234,7 +239,7 @@ CREATE TABLE IF NOT EXISTS cves (
     severity     VARCHAR(20)  DEFAULT 'unknown', -- critical/high/medium/low
     published_at TIMESTAMP,
     modified_at  TIMESTAMP,
-    "references" TEXT[],
+    cve_refs     TEXT[],
     cpe_list     TEXT[],                         -- affected products
     -- Xcloak enrichment
     has_exploit  BOOLEAN      DEFAULT FALSE,
@@ -341,6 +346,22 @@ ON CONFLICT (user_id) DO UPDATE
 """
 
 
+
+MIGRATION_SQL = """
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS reset_token         VARCHAR(255),
+    ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP;
+
+ALTER TABLE scan_templates
+    ADD COLUMN IF NOT EXISTS parameters  TEXT    DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS tags        TEXT[]  DEFAULT ARRAY[]::TEXT[],
+    ADD COLUMN IF NOT EXISTS is_active   BOOLEAN DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS updated_at  TIMESTAMP DEFAULT NOW();
+
+ALTER TABLE team_members
+    ADD COLUMN IF NOT EXISTS invited_by VARCHAR(64);
+"""
+
 def _make_dev_hash() -> str:
     """Hash dev_password with bcrypt if available, else sha256."""
     try:
@@ -357,6 +378,7 @@ async def init_schema(pg_pool):
     try:
         async with pg_pool.acquire() as conn:
             await conn.execute(SCHEMA_SQL)
+            await conn.execute(MIGRATION_SQL)
             await conn.execute(TIER_SEED_SQL)
             dev_hash = _make_dev_hash()
             await conn.execute(DEV_USER_SQL, dev_hash)

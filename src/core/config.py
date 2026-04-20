@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     razorpay_key_id:     str = Field(default="", validation_alias="RAZORPAY_KEY_ID")
     razorpay_key_secret: str = Field(default="", validation_alias="RAZORPAY_KEY_SECRET")
 
+    # ── Email (Hostinger SMTP) ────────────────────────────────────
+    smtp_host:     str = Field(default="smtp.hostinger.com", validation_alias="SMTP_HOST")
+    smtp_port:     int = Field(default=465,                   validation_alias="SMTP_PORT")
+    smtp_user:     str = Field(default="admin@xcloak.tech",  validation_alias="SMTP_USER")
+    smtp_password: str = Field(default="",                    validation_alias="SMTP_PASSWORD")
+
     # Agent Configuration
     agent_backend: AgentBackend = Field(default=AgentBackend.HARDCODED, validation_alias="AGENT_BACKEND")
     
