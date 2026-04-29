@@ -381,6 +381,32 @@ class ExecutionController:
                 process_id, final_risk.get("critical_count", 0),
             ))
 
+            # ── Scan complete email ───────────────────────────────────
+            async def _send_scan_email():
+                try:
+                    from src.core.database import db_manager as _db
+                    if not _db.pg_pool:
+                        return
+                    async with _db.pg_pool.acquire() as _c:
+                        user_row = await _c.fetchrow(
+                            "SELECT email, username FROM users WHERE user_id=$1",
+                            execution.user_id
+                        )
+                    if not user_row:
+                        return
+                    from src.services.email_service import send_scan_complete
+                    await send_scan_complete(
+                        to=user_row["email"],
+                        username=user_row["username"],
+                        target=target,
+                        scan_id=process_id,
+                        risk_level=final_risk.get("overall_risk", "none"),
+                        findings_count=len(all_findings),
+                    )
+                except Exception as _e:
+                    logger.warning(f"Scan complete email failed (non-critical): {_e}")
+            asyncio.create_task(_send_scan_email())
+
             _emit(process_id, "complete", {
                 "findings":    len(all_findings),
                 "risk":        final_risk.get("overall_risk", "none"),

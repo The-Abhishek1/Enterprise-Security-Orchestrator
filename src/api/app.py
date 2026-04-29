@@ -44,6 +44,14 @@ from src.workers.container_manager import ContainerManager
 from src.workers.network_manager import NetworkManager
 from src.workers.resource_monitor import ResourceMonitor
 from src.api.routes.v1 import findings, notifications, cve, metrics
+from src.api.routes.v1 import github as github_routes
+from src.api.routes.v1 import ai_scanner as ai_scanner_routes
+from src.api.routes.v1 import monitor      as monitor_routes
+from src.api.routes.v1 import cloud        as cloud_routes
+from src.api.routes.v1 import compliance   as compliance_routes
+from src.api.routes.v1 import darkweb      as darkweb_routes
+from src.api.routes.v1 import api_security as api_security_routes
+from src.api.routes.v1 import auth_scan    as auth_scan_routes
 
 settings = get_settings()
 
@@ -309,6 +317,15 @@ def create_app() -> FastAPI:
     app.include_router(metrics.router,       prefix=api_prefix)
     app.include_router(payments.router,      prefix=api_prefix)
     app.include_router(reports.router,       prefix=api_prefix)
+    app.include_router(github_routes.router, prefix=api_prefix)
+    app.include_router(ai_scanner_routes.router, prefix=api_prefix)
+    app.include_router(monitor_routes.router,      prefix=api_prefix)
+    app.include_router(cloud_routes.router,        prefix=api_prefix)
+    app.include_router(compliance_routes.router,   prefix=api_prefix)
+    app.include_router(darkweb_routes.router,      prefix=api_prefix)
+    app.include_router(api_security_routes.router, prefix=api_prefix)
+    app.include_router(auth_scan_routes.router,    prefix=api_prefix)
+
     if _has_admin:
         app.include_router(admin_routes.router, prefix=api_prefix)
     

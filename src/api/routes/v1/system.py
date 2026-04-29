@@ -59,13 +59,34 @@ async def save_llm_config(
     if provider not in ("openai", "local", "anthropic", "groq"):
         raise HTTPException(400, f"Unknown provider: {provider}")
 
-    # Update API keys in settings object (runtime only — not persisted to .env)
+    # Update API keys in settings object AND persist to .env
+    def _persist_env(key: str, value: str):
+        """Write/update a key in the .env file so it survives restarts."""
+        import os, re as _re
+        env_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '.env')
+        env_path = os.path.abspath(env_path)
+        try:
+            content = open(env_path).read() if os.path.exists(env_path) else ""
+            pattern = _re.compile(rf"^{_re.escape(key)}=.*$", _re.MULTILINE)
+            new_line = f"{key}={value}"
+            if pattern.search(content):
+                content = pattern.sub(new_line, content)
+            else:
+                content = content.rstrip() + f"\n{new_line}\n"
+            with open(env_path, 'w') as fh:
+                fh.write(content)
+        except Exception as pe:
+            logger.warning(f"Could not persist {key} to .env: {pe}")
+
     if req.openai_api_key:
         settings.openai_api_key = req.openai_api_key
+        _persist_env("OPENAI_API_KEY", req.openai_api_key)
     if req.anthropic_api_key:
         settings.anthropic_api_key = req.anthropic_api_key
+        _persist_env("ANTHROPIC_API_KEY", req.anthropic_api_key)
     if req.groq_api_key:
         settings.groq_api_key = req.groq_api_key
+        _persist_env("GROQ_API_KEY", req.groq_api_key)
 
     old_provider = llm_factory.default_provider
     llm_factory.default_provider = provider

@@ -43,3 +43,19 @@ asyncpg
 
 # Email
 aiosmtplib==3.0.1
+
+semgrep
+pip-audit
+dnspython
+boto3
+google-cloud-storage
+google-api-python-client
+google-auth
+azure-identity
+azure-mgmt-storage
+azure-mgmt-network
+azure-mgmt-sql
+azure-mgmt-keyvault
+azure-mgmt-monitor
+azure-mgmt-authorization
+playwright

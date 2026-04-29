@@ -257,14 +257,14 @@ async def list_findings(
     )
 
 
-@router.get("/findings/{process_id}")
-async def get_findings_for_scan(process_id: str, current_user: dict = Depends(get_current_user)):
-    return {"findings": await user_service.get_findings(process_id, current_user["sub"])}
-
-
 @router.get("/findings/stats")
 async def finding_stats(current_user: dict = Depends(get_current_user)):
     return await user_service.get_finding_stats(current_user["sub"])
+
+
+@router.get("/findings/{process_id}")
+async def get_findings_for_scan(process_id: str, current_user: dict = Depends(get_current_user)):
+    return {"findings": await user_service.get_findings(process_id, current_user["sub"])}
 
 
 # ── forgot password ──────────────────────────────────────────────────────────
@@ -296,11 +296,11 @@ async def forgot_password(request: Request):
 
             async with pool.acquire() as conn:
                 await conn.execute(
-                    """UPDATE users SET reset_token=$1, reset_expires=$2 WHERE user_id=$3""",
+                    """UPDATE users SET reset_token=$1, reset_token_expires=$2 WHERE user_id=$3""",
                     token_hash, expires, user["user_id"]
                 )
 
-            app_url = os.getenv("XCLOAK_URL", "https://xcloak.tech")
+            from src.core.config import get_settings as _gs; app_url = _gs().xcloak_url
             reset_url = f"{app_url}/reset-password?token={token}&email={email}"
 
             # Send email directly via SMTP
@@ -338,7 +338,7 @@ async def reset_password(request: Request):
 
     async with pool.acquire() as conn:
         user = await conn.fetchrow(
-            """SELECT user_id, username, reset_token, reset_expires
+            """SELECT user_id, username, reset_token, reset_token_expires
                FROM users WHERE email=$1""",
             email
         )
@@ -346,14 +346,14 @@ async def reset_password(request: Request):
     if not user or user["reset_token"] != token_hash:
         raise HTTPException(400, "Invalid or expired reset link")
 
-    if user["reset_expires"] and user["reset_expires"] < datetime.utcnow():
+    if user["reset_token_expires"] and user["reset_token_expires"] < datetime.utcnow():
         raise HTTPException(400, "Reset link has expired — request a new one")
 
     # Hash new password and clear token
     new_hash = await user_service.hash_password(new_pass)
     async with pool.acquire() as conn:
         await conn.execute(
-            """UPDATE users SET password_hash=$1, reset_token=NULL, reset_expires=NULL
+            """UPDATE users SET password_hash=$1, reset_token=NULL, reset_token_expires=NULL
                WHERE user_id=$2""",
             new_hash, user["user_id"]
         )

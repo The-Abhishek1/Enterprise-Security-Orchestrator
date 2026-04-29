@@ -113,10 +113,12 @@ class AnthropicClient(BaseLLMClient):
         data = {
             "model": self.model_name,
             "messages": [{"role": "user", "content": prompt}],
-            "system": system_prompt,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens
         }
+        # Anthropic rejects null system field — only include if set
+        if system_prompt:
+            data["system"] = system_prompt
         
         async with aiohttp.ClientSession() as session:
             async with session.post(self.base_url, headers=headers, json=data) as response:
@@ -334,11 +336,12 @@ class LLMFactory:
         return client
     
     async def test_connection(self, provider: Optional[str] = None) -> bool:
-        """Test connection to LLM provider"""
+        """Test connection to LLM provider — any non-empty response = success."""
         try:
             client = self.get_client(provider)
-            response = await client.generate("Say 'OK' if you can hear me.", "Respond with only the word OK.")
-            return "OK" in response
+            response = await client.generate("Reply with the single word: CONNECTED", "You are a test. Reply only: CONNECTED")
+            # Accept any non-empty response — LLMs may respond differently
+            return bool(response and response.strip())
         except Exception as e:
             logger.error(f"LLM connection test failed: {e}")
             return False

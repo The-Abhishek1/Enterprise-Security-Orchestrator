@@ -317,6 +317,19 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 
 -- ═══════════════════════════════════════════════
+-- SITE SETTINGS (payment mode, feature flags)
+-- ═══════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS site_settings (
+    key        VARCHAR(100) PRIMARY KEY,
+    value      TEXT         NOT NULL,
+    updated_at TIMESTAMP    DEFAULT NOW()
+);
+
+INSERT INTO site_settings (key, value)
+VALUES ('payment_mode', 'razorpay')
+ON CONFLICT (key) DO NOTHING;
+
+-- ═══════════════════════════════════════════════
 -- INDEXES
 -- ═══════════════════════════════════════════════
 CREATE INDEX IF NOT EXISTS idx_scan_history_user    ON scan_history(user_id);

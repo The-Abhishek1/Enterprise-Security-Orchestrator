@@ -27,7 +27,9 @@ async def send_email(to: str, subject: str, html: str) -> bool:
             port=s.smtp_port,
             username=s.smtp_user,
             password=s.smtp_password,
-            use_tls=True,
+            use_tls=(s.smtp_port == 465),     # 465=SSL, 587=STARTTLS
+            start_tls=(s.smtp_port == 587),    # STARTTLS for port 587
+            timeout=10,
         )
         logger.info('[email] ✓ sent "%s" to %s', subject, to)
         return True

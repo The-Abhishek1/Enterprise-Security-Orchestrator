@@ -74,7 +74,7 @@ async def set_user_tier(
             result = await c.execute(
                 "UPDATE users SET tier=$1, role=$2, updated_at=NOW() WHERE user_id=$3",
                 body.tier,
-                "admin" if body.tier == "admin" else body.tier,
+                "admin" if body.tier == "admin" else "user",
                 body.user_id
             )
         if result == "UPDATE 0":
@@ -192,7 +192,6 @@ async def list_payments(
 
     try:
         async with pool.acquire() as c:
-            # Check if payments table exists
             exists = await c.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name='payments')"
             )
@@ -227,7 +226,6 @@ async def list_payments(
 
     except Exception as e:
         logger.error(f"Admin payments query failed: {e}")
-        # Return empty gracefully rather than 500 — payments table may not exist yet
         return {"payments": [], "total": 0, "error": str(e)}
 
 
@@ -238,7 +236,6 @@ class PaymentModeRequest(BaseModel):
 
 @router.get("/settings/payment-mode")
 async def get_payment_mode(current_user: dict = Depends(admin_only)):
-    """Get current payment mode — razorpay or upi."""
     pool = db_manager.pg_pool
     if not pool:
         return {"mode": "razorpay"}
@@ -252,7 +249,6 @@ async def set_payment_mode(
     req: PaymentModeRequest,
     current_user: dict = Depends(admin_only)
 ):
-    """Toggle payment mode between razorpay and upi."""
     if req.mode not in ("razorpay", "upi"):
         raise HTTPException(400, "mode must be 'razorpay' or 'upi'")
     pool = db_manager.pg_pool
@@ -272,10 +268,10 @@ async def set_payment_mode(
 # ── Manual UPI Payment Recording ─────────────────────────────────────────────
 
 class UPIPaymentRequest(BaseModel):
-    user_id: str
+    user_id: str   # accepts user_id UUID, email, or username
     tier: str
-    amount: int          # in paise e.g. 99900 for ₹999
-    utr_number: str      # UPI transaction reference
+    amount: int    # in paise e.g. 99900 for ₹999
+    utr_number: str
     note: Optional[str] = None
 
 @router.post("/payments/upi")
@@ -283,7 +279,8 @@ async def record_upi_payment(
     req: UPIPaymentRequest,
     current_user: dict = Depends(admin_only)
 ):
-    """Admin records a manual UPI payment and upgrades user tier."""
+    """Admin records a manual UPI payment and upgrades user tier.
+    user_id field accepts the actual UUID, email address, or username."""
     if req.tier not in VALID_TIERS:
         raise HTTPException(400, f"Invalid tier: {req.tier}")
     pool = db_manager.pg_pool
@@ -295,26 +292,41 @@ async def record_upi_payment(
     order_id   = f"manual_{_uuid.uuid4().hex[:12]}"
 
     async with pool.acquire() as c:
-        # Record payment
+        # ── Resolve email / username → actual user_id UUID ────────────────────
+        resolved = await c.fetchrow(
+            "SELECT user_id, username, email FROM users WHERE user_id=$1 OR email=$1 OR username=$1",
+            req.user_id
+        )
+        if not resolved:
+            raise HTTPException(404, f"User not found: {req.user_id}")
+        actual_user_id = resolved["user_id"]
+
+        logger.info(
+            f"UPI payment: resolved '{req.user_id}' → user_id={actual_user_id} "
+            f"({resolved['username']} / {resolved['email']})"
+        )
+
+        # ── Record payment ────────────────────────────────────────────────────
         await c.execute(
             """INSERT INTO payments (payment_id, order_id, user_id, tier, amount, status, paid_at)
                VALUES ($1, $2, $3, $4, $5, 'captured', NOW())
                ON CONFLICT (payment_id) DO NOTHING""",
-            payment_id, order_id, req.user_id, req.tier, req.amount
+            payment_id, order_id, actual_user_id, req.tier, req.amount
         )
-        # Upgrade user tier
+
+        # ── Upgrade user tier ─────────────────────────────────────────────────
         await c.execute(
             "UPDATE users SET tier=$1, role=$2, updated_at=NOW() WHERE user_id=$3",
             req.tier,
-            "admin" if req.tier == "admin" else req.tier,
-            req.user_id
+            "admin" if req.tier == "admin" else "user",
+            actual_user_id
         )
 
     logger.info(
-        f"UPI payment recorded: user={req.user_id} tier={req.tier} "
+        f"UPI payment recorded: user={actual_user_id} tier={req.tier} "
         f"amount={req.amount} utr={req.utr_number} by admin={current_user.get('username')}"
     )
-    return {"ok": True, "payment_id": payment_id, "tier": req.tier}
+    return {"ok": True, "payment_id": payment_id, "tier": req.tier, "user_id": actual_user_id}
 
 
 @router.get("/settings/payment-mode/public")
@@ -329,3 +341,34 @@ async def get_payment_mode_public():
         return {"mode": row["value"] if row else "razorpay"}
     except Exception:
         return {"mode": "razorpay"}
+
+
+# ── Internal email lookup (called by XCloak server-side, no user JWT) ─────────
+@router.get("/users/email")
+async def lookup_user_email(
+    alias: str,
+    request: Request,
+):
+    """
+    Internal endpoint — XCloak calls this to get a user's email for transactional emails.
+    Secured by X-Internal-Secret header, not user JWT.
+    """
+    from src.core.config import get_settings as _gs
+    import os as _os
+    secret = request.headers.get("X-Internal-Secret", "")
+    expected = _os.getenv("INTERNAL_EMAIL_SECRET", "xcloak-internal")
+    if secret != expected:
+        raise HTTPException(403, "Forbidden")
+
+    pool = db_manager.pg_pool
+    if not pool:
+        raise HTTPException(503, "Database unavailable")
+
+    async with pool.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT email, username FROM users WHERE username=$1 OR user_id=$1",
+            alias
+        )
+    if not row:
+        raise HTTPException(404, "User not found")
+    return {"email": row["email"], "username": row["username"]}

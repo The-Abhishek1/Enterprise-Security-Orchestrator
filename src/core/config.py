@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     smtp_user:     str = Field(default="admin@xcloak.tech",  validation_alias="SMTP_USER")
     smtp_password: str = Field(default="",                    validation_alias="SMTP_PASSWORD")
 
+    # ── XCloak integration ─────────────────────────────────────────
+    xcloak_url:             str = Field(default="https://xcloak.tech", validation_alias="XCLOAK_URL")
+    internal_email_secret:  str = Field(default="xcloak-internal",    validation_alias="INTERNAL_EMAIL_SECRET")
+
     # Agent Configuration
     agent_backend: AgentBackend = Field(default=AgentBackend.HARDCODED, validation_alias="AGENT_BACKEND")
     
