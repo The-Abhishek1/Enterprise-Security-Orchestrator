@@ -1,4 +1,4 @@
-# 🛡️ Enterprise Security Orchestrator (ESO)
+# 🛡️ XCLOAK - AI-powered cybersecurity platform
 
 **AI-powered penetration testing platform** — describe what you want to scan, and the AI plans it, executes it, analyzes results, and generates a professional report.
 
